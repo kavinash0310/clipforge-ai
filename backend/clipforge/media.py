@@ -1,0 +1,110 @@
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+from pathlib import Path
+from typing import Any
+
+
+VIDEO_EXTENSIONS = {".mp4", ".m4v", ".mkv", ".mov", ".avi", ".webm", ".mpeg", ".mpg"}
+
+
+def validate_video_path(path_value: str) -> Path:
+    path = Path(path_value).expanduser().resolve()
+    if not path.exists() or not path.is_file():
+        raise ValueError("That file does not exist or is not a regular file.")
+    if path.suffix.lower() not in VIDEO_EXTENSIONS:
+        raise ValueError("Choose a supported video file (MP4, MKV, MOV, AVI, or WebM).")
+    if path.stat().st_size == 0:
+        raise ValueError("The selected video file is empty.")
+    return path
+
+
+def probe_video(path: Path) -> dict[str, Any]:
+    executable = shutil.which("ffprobe")
+    if not executable:
+        raise RuntimeError("ffprobe was not found on PATH. Install FFmpeg and restart ClipForge.")
+    command = [
+        executable,
+        "-v", "error",
+        "-show_streams",
+        "-show_format",
+        "-of", "json",
+        str(path),
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError("ffprobe timed out while reading the selected video.") from error
+    if result.returncode != 0:
+        detail = (result.stderr or "").strip()[-800:]
+        raise RuntimeError(f"ffprobe could not read this video. {detail}".strip())
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        raise RuntimeError("ffprobe returned invalid media metadata.") from error
+
+    streams = payload.get("streams", [])
+    video = next((item for item in streams if item.get("codec_type") == "video"), None)
+    if video is None:
+        raise RuntimeError("The selected file does not contain a video stream.")
+    audio = next((item for item in streams if item.get("codec_type") == "audio"), None)
+    format_info = payload.get("format", {})
+    duration_value = format_info.get("duration") or video.get("duration")
+    try:
+        duration = float(duration_value) if duration_value is not None else None
+    except (ValueError, TypeError):
+        duration = None
+    stat = path.stat()
+    return {
+        "container": format_info.get("format_name"),
+        "duration_seconds": duration,
+        "size_bytes": stat.st_size,
+        "modified_at": stat.st_mtime,
+        "video": {
+            "codec": video.get("codec_name"),
+            "width": video.get("width"),
+            "height": video.get("height"),
+            "frame_rate": video.get("avg_frame_rate"),
+            "pixel_format": video.get("pix_fmt"),
+        },
+        "audio": {
+            "codec": audio.get("codec_name") if audio else None,
+            "sample_rate": audio.get("sample_rate") if audio else None,
+            "channels": audio.get("channels") if audio else None,
+        },
+    }
+
+
+def choose_video_file() -> str | None:
+    if os.name != "nt":
+        raise RuntimeError("The native file picker is available in the Windows build only.")
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except ImportError as error:
+        raise RuntimeError("Python's Windows file picker is unavailable in this installation.") from error
+
+    root = tk.Tk()
+    try:
+        root.withdraw()
+        root.attributes("-topmost", True)
+        selected = filedialog.askopenfilename(
+            title="Choose a gaming recording",
+            filetypes=[("Video recordings", "*.mp4 *.m4v *.mkv *.mov *.avi *.webm *.mpeg *.mpg"), ("All files", "*.*")],
+        )
+    except tk.TclError as error:
+        raise RuntimeError(f"The Windows file picker could not open: {error}") from error
+    finally:
+        root.destroy()
+    return str(Path(selected).resolve()) if selected else None
+

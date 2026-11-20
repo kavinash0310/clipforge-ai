@@ -23,14 +23,19 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    Import[Authorized local recording] --> Probe[ffprobe metadata]
-    Probe --> Analyze[Audio and scene signals]
-    Analyze --> ASR[faster-whisper transcript]
-    ASR --> Score[Candidate scoring with context]
-    Score --> Render[FFmpeg clip and vertical render]
-    Render --> Review[Human review and correction]
-    Review --> Approve[Explicit publish approval]
-    Approve --> YouTube[YouTube OAuth upload]
+    Import[Local recording + authorization confirmation] --> Probe[ffprobe metadata]
+    Probe --> Extract[FFmpeg mono 16 kHz audio]
+    Extract --> ASR[faster-whisper CPU int8 transcript]
+    Extract --> Signals[Audio energy signals]
+    Probe --> Scenes[FFmpeg scene-change signals]
+    ASR --> Score[Deterministic weighted ranking]
+    Signals --> Score
+    Scenes --> Score
+    Score --> Review[Ranked candidate review]
+    Review --> Render[FFmpeg clip and vertical render]
+    Render --> Approval[Human review and correction]
+    Approval --> PublishApproval[Explicit publish approval]
+    PublishApproval --> YouTube[YouTube OAuth upload]
 ```
 
 ## Technology choices
@@ -47,4 +52,6 @@ flowchart LR
 ## Operating boundaries
 
 The service binds to loopback. The browser UI uses same-origin API paths in a production build and a narrow localhost proxy in development. SQLite contains application state, not video bytes. The output directory is separate from source directories. YouTube access is an opt-in OAuth integration and is not part of the current phase.
+
+Transcription uses CPU `int8` to keep the machine's 4 GB GPU available to the desktop and other local tools. The first analysis downloads the selected faster-whisper model into app data. Candidate scoring is deterministic and combines audio energy, speech context, excitement phrases, and scene-change counts; its score is a ranking aid for human review.
 

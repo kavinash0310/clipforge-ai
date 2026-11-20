@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import uuid
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -18,6 +19,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "cpu_limit_percent": 75,
     "ollama_url": "http://127.0.0.1:11434",
     "ollama_model": "qwen3.5:4b",
+    "transcription_model": "base",
     "public_uploads_enabled": False,
 }
 
@@ -86,12 +88,40 @@ def initialize_database(database_path: Path | None = None) -> None:
                 updated_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS recording_metadata (
+                recording_id TEXT PRIMARY KEY REFERENCES recordings(id) ON DELETE CASCADE,
+                metadata_json TEXT NOT NULL,
+                probed_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS recording_transcripts (
+                recording_id TEXT PRIMARY KEY REFERENCES recordings(id) ON DELETE CASCADE,
+                language TEXT,
+                language_probability REAL,
+                model_name TEXT NOT NULL,
+                device TEXT NOT NULL,
+                transcript_path TEXT NOT NULL,
+                subtitle_path TEXT NOT NULL,
+                segments_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS recording_analyses (
+                recording_id TEXT PRIMARY KEY REFERENCES recordings(id) ON DELETE CASCADE,
+                analysis_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS clips (
                 id TEXT PRIMARY KEY,
                 recording_id TEXT REFERENCES recordings(id) ON DELETE SET NULL,
                 file_path TEXT,
                 title TEXT,
                 score REAL,
+                start_seconds REAL NOT NULL DEFAULT 0,
+                end_seconds REAL NOT NULL DEFAULT 0,
+                reason_json TEXT NOT NULL DEFAULT '[]',
+                signals_json TEXT NOT NULL DEFAULT '{}',
                 status TEXT NOT NULL DEFAULT 'candidate',
                 created_at TEXT NOT NULL
             );
@@ -127,6 +157,15 @@ def initialize_database(database_path: Path | None = None) -> None:
                 ON publish_events(status, updated_at DESC);
             """
         )
+        clip_columns = {row["name"] for row in connection.execute("PRAGMA table_info(clips)").fetchall()}
+        for name, declaration in (
+            ("start_seconds", "REAL NOT NULL DEFAULT 0"),
+            ("end_seconds", "REAL NOT NULL DEFAULT 0"),
+            ("reason_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("signals_json", "TEXT NOT NULL DEFAULT '{}'"),
+        ):
+            if name not in clip_columns:
+                connection.execute(f"ALTER TABLE clips ADD COLUMN {name} {declaration}")
         timestamp = utc_now()
         for key, value in DEFAULT_SETTINGS.items():
             connection.execute(
@@ -164,7 +203,7 @@ def write_settings(updates: dict[str, Any], database_path: Path | None = None) -
 def read_overview(database_path: Path | None = None) -> dict[str, Any]:
     with database_session(database_path) as connection:
         recordings = connection.execute(
-            "SELECT COUNT(*) AS total, SUM(CASE WHEN status = 'ready' THEN 1 ELSE 0 END) AS ready FROM recordings"
+            "SELECT COUNT(*) AS total, SUM(CASE WHEN status IN ('ready', 'analyzed') THEN 1 ELSE 0 END) AS ready FROM recordings"
         ).fetchone()
         clips = connection.execute("SELECT COUNT(*) AS total FROM clips").fetchone()
         jobs = connection.execute(
@@ -203,4 +242,301 @@ def read_overview(database_path: Path | None = None) -> dict[str, Any]:
         "recent_jobs": [dict(row) for row in recent_jobs],
         "updated_at": utc_now(),
     }
+
+
+def create_recording(recording_id: str, file_path: str, display_name: str, authorized: bool, database_path: Path | None = None) -> None:
+    timestamp = utc_now()
+    with database_session(database_path) as connection:
+        existing = connection.execute(
+            "SELECT id FROM recordings WHERE lower(file_path) = lower(?)",
+            (file_path,),
+        ).fetchone()
+        if existing is not None:
+            raise ValueError(existing["id"])
+        connection.execute(
+            "INSERT INTO recordings(id, file_path, display_name, status, authorized, created_at) VALUES (?, ?, ?, 'queued', ?, ?)",
+            (recording_id, file_path, display_name, int(authorized), timestamp),
+        )
+        connection.execute(
+            "INSERT INTO jobs(id, recording_id, job_type, status, progress, stage, created_at, updated_at) VALUES (?, ?, 'inspect_recording', 'queued', 0, 'queued', ?, ?)",
+            (f"job-{recording_id}", recording_id, timestamp, timestamp),
+        )
+
+
+def create_analysis_job(recording_id: str, database_path: Path | None = None) -> dict[str, Any]:
+    timestamp = utc_now()
+    with database_session(database_path) as connection:
+        recording = connection.execute(
+            "SELECT status, authorized, duration_seconds FROM recordings WHERE id = ?",
+            (recording_id,),
+        ).fetchone()
+        if recording is None:
+            raise LookupError("Recording not found.")
+        if not recording["authorized"]:
+            raise PermissionError("This recording has no authorization confirmation.")
+        active = connection.execute(
+            "SELECT id, status FROM jobs WHERE recording_id = ? AND job_type = 'analyze_recording' AND status IN ('queued', 'running', 'paused') ORDER BY created_at DESC LIMIT 1",
+            (recording_id,),
+        ).fetchone()
+        if active is not None:
+            return {"id": active["id"], "recording_id": recording_id, "status": active["status"], "existing": True}
+        if recording["status"] not in {"ready", "analyzed", "failed"}:
+            raise RuntimeError("Wait for recording inspection to finish before analysis.")
+        if recording["duration_seconds"] is None:
+            raise RuntimeError("Recording inspection did not finish successfully. Retry inspection before analysis.")
+        job_id = f"job-{uuid.uuid4().hex}"
+        connection.execute(
+            "INSERT INTO jobs(id, recording_id, job_type, status, progress, stage, created_at, updated_at) VALUES (?, ?, 'analyze_recording', 'queued', 0, 'queued', ?, ?)",
+            (job_id, recording_id, timestamp, timestamp),
+        )
+        connection.execute(
+            "UPDATE recordings SET status = 'queued' WHERE id = ?",
+            (recording_id,),
+        )
+    return {"id": job_id, "recording_id": recording_id, "status": "queued", "existing": False}
+
+
+def list_recordings() -> list[dict[str, Any]]:
+    with database_session() as connection:
+        rows = connection.execute(
+            """
+            SELECT recordings.id, recordings.file_path, recordings.display_name,
+                   recordings.duration_seconds, recordings.status, recordings.authorized,
+                   recordings.created_at, recording_metadata.metadata_json,
+                   recording_metadata.probed_at, recording_transcripts.model_name AS transcript_model,
+                   recording_transcripts.language AS transcript_language,
+                   recording_transcripts.language_probability AS language_probability
+            FROM recordings
+            LEFT JOIN recording_metadata ON recording_metadata.recording_id = recordings.id
+            LEFT JOIN recording_transcripts ON recording_transcripts.recording_id = recordings.id
+            ORDER BY recordings.created_at DESC
+            """
+        ).fetchall()
+    results = []
+    for row in rows:
+        item = dict(row)
+        item["authorized"] = bool(item["authorized"])
+        item["metadata"] = json.loads(item.pop("metadata_json")) if item.get("metadata_json") else None
+        results.append(item)
+    return results
+
+
+def list_jobs(limit: int = 30) -> list[dict[str, Any]]:
+    with database_session() as connection:
+        rows = connection.execute(
+            """
+            SELECT jobs.id, jobs.recording_id, jobs.job_type, jobs.status, jobs.progress,
+                   jobs.stage, jobs.error_message, jobs.attempt_count, jobs.created_at,
+                   jobs.updated_at, recordings.display_name AS recording_name
+            FROM jobs LEFT JOIN recordings ON recordings.id = jobs.recording_id
+            ORDER BY jobs.updated_at DESC LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def claim_next_job() -> dict[str, Any] | None:
+    with database_session() as connection:
+        row = connection.execute(
+            "SELECT id, recording_id, job_type, attempt_count FROM jobs WHERE status = 'queued' ORDER BY created_at LIMIT 1"
+        ).fetchone()
+        if row is None:
+            return None
+        timestamp = utc_now()
+        changed = connection.execute(
+            "UPDATE jobs SET status = 'running', stage = 'starting', progress = 3, attempt_count = attempt_count + 1, updated_at = ? WHERE id = ? AND status = 'queued'",
+            (timestamp, row["id"]),
+        ).rowcount
+        if changed != 1:
+            return None
+        connection.execute(
+            "UPDATE recordings SET status = 'processing' WHERE id = ?",
+            (row["recording_id"],),
+        )
+        return dict(row)
+
+
+def recover_interrupted_jobs() -> None:
+    timestamp = utc_now()
+    with database_session() as connection:
+        rows = connection.execute(
+            "SELECT DISTINCT recording_id FROM jobs WHERE status = 'running' AND recording_id IS NOT NULL"
+        ).fetchall()
+        connection.execute(
+            "UPDATE jobs SET status = 'queued', stage = 'recovered', updated_at = ? WHERE status = 'running'",
+            (timestamp,),
+        )
+        for row in rows:
+            connection.execute(
+                "UPDATE recordings SET status = 'queued' WHERE id = ?",
+                (row["recording_id"],),
+            )
+
+
+def resume_paused_jobs() -> None:
+    timestamp = utc_now()
+    with database_session() as connection:
+        rows = connection.execute(
+            "SELECT DISTINCT recording_id FROM jobs WHERE status = 'paused' AND recording_id IS NOT NULL"
+        ).fetchall()
+        connection.execute(
+            "UPDATE jobs SET status = 'queued', stage = 'queued', updated_at = ? WHERE status = 'paused'",
+            (timestamp,),
+        )
+        for row in rows:
+            connection.execute(
+                "UPDATE recordings SET status = 'queued' WHERE id = ?",
+                (row["recording_id"],),
+            )
+
+
+def update_job(job_id: str, *, status: str | None = None, progress: float | None = None, stage: str | None = None, error_message: str | None = None) -> None:
+    updates = {"updated_at": utc_now()}
+    for key, value in (("status", status), ("progress", progress), ("stage", stage), ("error_message", error_message)):
+        if value is not None:
+            updates[key] = value
+    assignments = ", ".join(f"{key} = ?" for key in updates)
+    with database_session() as connection:
+        connection.execute(
+            f"UPDATE jobs SET {assignments} WHERE id = ?",
+            (*updates.values(), job_id),
+        )
+
+
+def update_recording_status(recording_id: str, status: str, duration_seconds: float | None = None) -> None:
+    with database_session() as connection:
+        connection.execute(
+            "UPDATE recordings SET status = ?, duration_seconds = COALESCE(?, duration_seconds) WHERE id = ?",
+            (status, duration_seconds, recording_id),
+        )
+
+
+def save_recording_metadata(recording_id: str, metadata: dict[str, Any]) -> None:
+    with database_session() as connection:
+        connection.execute(
+            """
+            INSERT INTO recording_metadata(recording_id, metadata_json, probed_at) VALUES (?, ?, ?)
+            ON CONFLICT(recording_id) DO UPDATE SET metadata_json = excluded.metadata_json,
+                probed_at = excluded.probed_at
+            """,
+            (recording_id, json.dumps(metadata), utc_now()),
+        )
+
+
+def save_analysis_result(recording_id: str, result: dict[str, Any], candidates: list[dict[str, Any]], database_path: Path | None = None) -> None:
+    transcript = result["transcript"]
+    timestamp = utc_now()
+    profile = result["audio_profile"].copy()
+    profile.pop("energy_buckets", None)
+    analysis = {
+        "model": transcript["model"],
+        "device": transcript["device"],
+        "compute_type": transcript["compute_type"],
+        "scene_cuts": result["scene_cuts"],
+        "audio_profile": profile,
+        "candidate_count": len(candidates),
+        "scoring": {
+            "method": "deterministic weighted signals",
+            "weights": {"audio_energy": 0.34, "speech_context": 0.24, "excitement_cues": 0.27, "scene_changes": 0.15},
+        },
+    }
+    with database_session(database_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO recording_transcripts(recording_id, language, language_probability, model_name, device, transcript_path, subtitle_path, segments_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(recording_id) DO UPDATE SET language = excluded.language,
+                language_probability = excluded.language_probability, model_name = excluded.model_name,
+                device = excluded.device, transcript_path = excluded.transcript_path,
+                subtitle_path = excluded.subtitle_path, segments_json = excluded.segments_json,
+                created_at = excluded.created_at
+            """,
+            (
+                recording_id, transcript["language"], transcript["language_probability"],
+                transcript["model"], transcript["device"], result["transcript_path"],
+                result["subtitle_path"], json.dumps(transcript["segments"], ensure_ascii=False), timestamp,
+            ),
+        )
+        connection.execute(
+            "INSERT INTO recording_analyses(recording_id, analysis_json, created_at) VALUES (?, ?, ?) ON CONFLICT(recording_id) DO UPDATE SET analysis_json = excluded.analysis_json, created_at = excluded.created_at",
+            (recording_id, json.dumps(analysis, ensure_ascii=False), timestamp),
+        )
+        connection.execute("DELETE FROM clips WHERE recording_id = ? AND status = 'candidate'", (recording_id,))
+        for candidate in candidates:
+            connection.execute(
+                "INSERT INTO clips(id, recording_id, file_path, title, score, start_seconds, end_seconds, reason_json, signals_json, status, created_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, 'candidate', ?)",
+                (
+                    uuid.uuid4().hex, recording_id, candidate["title"], candidate["score"],
+                    candidate["start_seconds"], candidate["end_seconds"],
+                    json.dumps(candidate["reasons"], ensure_ascii=False),
+                    json.dumps(candidate["signals"], ensure_ascii=False), timestamp,
+                ),
+            )
+        connection.execute("UPDATE recordings SET status = 'analyzed' WHERE id = ?", (recording_id,))
+
+
+def get_recording_analysis(recording_id: str, database_path: Path | None = None) -> dict[str, Any] | None:
+    with database_session(database_path) as connection:
+        recording = connection.execute("SELECT id FROM recordings WHERE id = ?", (recording_id,)).fetchone()
+        if recording is None:
+            return None
+        transcript = connection.execute(
+            "SELECT language, language_probability, model_name, device, transcript_path, subtitle_path, segments_json, created_at FROM recording_transcripts WHERE recording_id = ?",
+            (recording_id,),
+        ).fetchone()
+        analysis = connection.execute(
+            "SELECT analysis_json, created_at FROM recording_analyses WHERE recording_id = ?",
+            (recording_id,),
+        ).fetchone()
+        clips = connection.execute(
+            "SELECT id, title, score, start_seconds, end_seconds, reason_json, signals_json, status, created_at FROM clips WHERE recording_id = ? AND status = 'candidate' ORDER BY score DESC, start_seconds",
+            (recording_id,),
+        ).fetchall()
+    if transcript is None:
+        return {"recording_id": recording_id, "transcript": None, "analysis": None, "candidates": []}
+    transcript_value = dict(transcript)
+    transcript_value["segments"] = json.loads(transcript_value.pop("segments_json"))
+    analysis_value = json.loads(analysis["analysis_json"]) if analysis else None
+    candidate_values = []
+    for row in clips:
+        value = dict(row)
+        value["reasons"] = json.loads(value.pop("reason_json"))
+        value["signals"] = json.loads(value.pop("signals_json"))
+        candidate_values.append(value)
+    return {
+        "recording_id": recording_id,
+        "transcript": transcript_value,
+        "analysis": analysis_value,
+        "candidates": candidate_values,
+    }
+
+
+def get_job(job_id: str) -> dict[str, Any] | None:
+    with database_session() as connection:
+        row = connection.execute(
+            "SELECT id, recording_id, job_type, status, progress, stage, error_message, attempt_count FROM jobs WHERE id = ?",
+            (job_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def retry_job(job_id: str, max_attempts: int = 3) -> dict[str, Any] | None:
+    timestamp = utc_now()
+    with database_session() as connection:
+        row = connection.execute(
+            "SELECT id, recording_id, status, attempt_count FROM jobs WHERE id = ?",
+            (job_id,),
+        ).fetchone()
+        if row is None or row["status"] != "failed" or row["attempt_count"] >= max_attempts:
+            return None
+        connection.execute(
+            "UPDATE jobs SET status = 'queued', progress = 0, stage = 'queued', error_message = NULL, updated_at = ? WHERE id = ?",
+            (timestamp, job_id),
+        )
+        connection.execute(
+            "UPDATE recordings SET status = 'queued' WHERE id = ?",
+            (row["recording_id"],),
+        )
+    return get_job(job_id)
 

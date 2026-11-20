@@ -15,3 +15,25 @@
 - Resumable job design, retries, idempotency, and resource limits.
 - OAuth consent, resumable YouTube upload, quota-aware analytics, and privacy defaults.
 
+## Phase 3 engineering notes
+
+### Speech transcription and SRT
+
+- **What:** Local timestamped speech recognition and subtitle export.
+- **Why:** Candidate review benefits from searchable context and usable captions.
+- **How:** FFmpeg normalizes audio to temporary mono 16 kHz PCM. faster-whisper uses a cached model with CPU int8; recognized segments are persisted as JSON and SRT. The original source path stays untouched.
+- **Technology choice:** faster-whisper uses CTranslate2 and allows quantized CPU inference. PyAV is limited to a compatible release until the released decoder is updated.
+- **Alternatives:** whisper.cpp or another local speech model; CPU/GPU choice after runtime profiling.
+- **How to verify:** Inspect recognized text/timestamps, download SRT, compare against a known spoken test recording, and monitor failed-job detail.
+- **Interview explanation:** “I normalize arbitrary recording audio to one known shape before running a quantized local ASR model, then persist timed segments for reuse by downstream modules.”
+
+### Candidate detection and ranking
+
+- **What:** Finds timestamp windows with stronger audio, speech, reaction phrases, or scene transitions.
+- **Why:** A long recording needs a shortlist, while explainable signals make the shortlist auditable.
+- **How:** One-second RMS levels and transcript segments are combined with FFmpeg scene cuts. Weighted scoring ranks bounded context windows; overlap suppression avoids near-duplicate candidates.
+- **Technology choice:** Deterministic Python scoring and FFmpeg signal extraction keep the process local and reproducible.
+- **Alternatives:** Game-specific event detectors, OpenCV features, learned video highlight models, or local-LLM reranking.
+- **How to verify:** Unit-test flat-signal rejection, signal contributions, context coverage, ranking, and overlap; inspect signal labels alongside a test clip.
+- **Interview explanation:** “The score is not a claim of entertainment quality: it is a transparent ranking that helps a human find moments faster.”
+

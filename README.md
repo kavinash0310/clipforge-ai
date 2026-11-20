@@ -1,10 +1,10 @@
 # ClipForge AI
 
-ClipForge AI is a local-first gaming content studio for turning recordings you own or are authorized to use into reviewed short-form clips. Originals remain at their current paths. The app stores its database and generated outputs under `%LOCALAPPDATA%\ClipForgeAI` on Windows.
+ClipForge AI is a local-first gaming content studio for turning recordings you own or are authorized to use into reviewed short-form clips. Originals remain at their current paths. The app stores its database, local Whisper models, transcripts, subtitles, and generated outputs under `%LOCALAPPDATA%\ClipForgeAI` on Windows.
 
 ## Current status
 
-Phase 1 is complete: the dashboard, local settings, database foundation, and hardware/tool health checks are implemented and verified. Video processing and publishing are still upcoming. Dashboard totals are queried from SQLite; an empty database therefore shows zero activity rather than sample metrics.
+Phase 1 is complete: dashboard, saved settings, database foundation, and hardware checks. Phase 3 is complete: authorized local import, FFmpeg inspection, faster-whisper transcription, SRT output, and deterministic highlight ranking. Clip rendering, approval, and publishing come later. Dashboard totals are queried from SQLite, so a fresh database shows zero activity rather than sample metrics.
 
 ## Run in development
 
@@ -43,7 +43,7 @@ python -m unittest discover -s backend/tests -v
 npm --prefix frontend run build
 ```
 
-The current verification run passed all three database checks, the TypeScript/Vite production build, and live API/static-dashboard integration.
+The current verification passed seven backend checks, the TypeScript/Vite production build, a complete local transcription/highlight flow using a synthetic spoken recording, and live API/static-dashboard integration.
 
 See [INSTALLATION.md](INSTALLATION.md), [USER_GUIDE.md](USER_GUIDE.md), and [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for current behavior and the next milestones.
 

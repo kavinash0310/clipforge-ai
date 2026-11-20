@@ -30,6 +30,8 @@ npm --prefix frontend run dev
 
 Open `http://127.0.0.1:5173`. For a single local endpoint, build the UI with `npm --prefix frontend run build`, then run the backend and open `http://127.0.0.1:8000`.
 
+The first analysis downloads the selected faster-whisper model into the app data directory. Transcription uses CPU int8. The dependency file constrains PyAV below version 19 because the released faster-whisper decoder still passes an argument removed in PyAV 19.
+
 ## Data location
 
 Default Windows data: `%LOCALAPPDATA%\ClipForgeAI`. Set `CLIPFORGE_DATA_DIR` before starting the service to select another directory. Keep the app database, generated outputs, and credentials out of Git.

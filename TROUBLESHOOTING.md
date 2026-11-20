@@ -16,6 +16,14 @@ The diagnostics call `nvidia-smi`. Install a compatible NVIDIA driver and verify
 
 Start the Ollama app/service and verify its local API on `127.0.0.1:11434`. The app does not download model weights automatically. Confirm the configured model exists with `ollama list`.
 
+## Transcription fails while decoding audio
+
+Reinstall project dependencies with `python -m pip install -r requirements.txt`. faster-whisper 1.2.1 is incompatible with PyAV 19's changed `av.open` signature, so this project constrains PyAV below 19.
+
+## First transcription takes a while
+
+The selected Whisper model downloads when you first analyze a recording. The queue shows its current stage. After the model is cached in app data, transcription runs locally without sending recording audio to a hosted service.
+
 ## Reset local data
 
 Stop ClipForge and back up `%LOCALAPPDATA%\ClipForgeAI` before changing or removing it. Removing the SQLite database resets settings and app records; it does not remove original recordings.

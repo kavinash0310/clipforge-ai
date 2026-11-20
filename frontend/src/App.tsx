@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -27,7 +27,7 @@ import {
   Zap,
 } from "lucide-react";
 
-type Page = "overview" | "settings";
+type Page = "overview" | "media" | "settings";
 type Job = {
   id: string;
   job_type: string;
@@ -75,11 +75,63 @@ type Settings = {
   cpu_limit_percent: number;
   ollama_url: string;
   ollama_model: string;
+  transcription_model: "tiny" | "base" | "small";
   public_uploads_enabled: boolean;
+};
+type Recording = {
+  id: string;
+  file_path: string;
+  display_name: string;
+  duration_seconds: number | null;
+  status: string;
+  authorized: boolean;
+  created_at: string;
+  transcript_model: string | null;
+  transcript_language: string | null;
+  language_probability: number | null;
+  metadata: {
+    size_bytes?: number;
+    video?: { width?: number; height?: number; codec?: string };
+  } | null;
+};
+type QueueJob = Job & {
+  error_message?: string | null;
+  attempt_count?: number;
+  recording_id?: string | null;
+};
+type RecordingAnalysis = {
+  recording_id: string;
+  transcript: null | {
+    language: string | null;
+    language_probability: number | null;
+    model_name: string;
+    device: string;
+    transcript_path: string;
+    subtitle_path: string;
+    created_at: string;
+    segments: Array<{ start: number; end: number; text: string; confidence: number }>;
+  };
+  analysis: null | {
+    scene_cuts: number[];
+    candidate_count: number;
+    audio_profile: { mean_rms: number; peak_rms: number; active_audio_fraction: number };
+    scoring: { method: string; weights: Record<string, number> };
+  };
+  candidates: Array<{
+    id: string;
+    title: string;
+    score: number;
+    start_seconds: number;
+    end_seconds: number;
+    reasons: string[];
+    signals: { audio_energy: number; speech_density: number; excitement_cues: number; scene_changes: number };
+    status: string;
+  }>;
 };
 
 const navItems = [
   { label: "Overview", icon: Layers3, page: "overview" as const },
+  { label: "Media library", icon: MonitorPlay, page: "media" as const },
   { label: "Settings", icon: Settings2, page: "settings" as const },
 ];
 
@@ -109,6 +161,15 @@ function formatBytes(value: number | null | undefined) {
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+}
+
+function formatDuration(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return "—";
+  const seconds = Math.max(0, Math.floor(value));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const rest = seconds % 60;
+  return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}` : `${minutes}:${String(rest).padStart(2, "0")}`;
 }
 
 function greeting() {
@@ -254,7 +315,7 @@ function App() {
 
       <main className="main-area">
         <header className="topbar">
-          <div className="breadcrumb"><span>CLIPFORGE AI</span><span className="crumb-divider">/</span><span>{page === "overview" ? "OVERVIEW" : "SETTINGS"}</span></div>
+              <div className="breadcrumb"><span>CLIPFORGE AI</span><span className="crumb-divider">/</span><span>{page === "overview" ? "OVERVIEW" : page === "media" ? "MEDIA LIBRARY" : "SETTINGS"}</span></div>
           <div className="topbar-actions">
             <div className={`system-pill ${systemReady ? "ready" : "attention"}`}>
               <span className="pill-dot" />{systemReady ? "Studio ready" : "Setup needs attention"}
@@ -344,6 +405,8 @@ function App() {
                 </div>
               </section>
             </>
+          ) : page === "media" ? (
+            <MediaPage onRefresh={() => void loadDashboard(true)} />
           ) : (
             <SettingsPage
               settings={settings}
@@ -391,6 +454,202 @@ function ActivityRow({ job }: { job: Job }) {
       </div>
       <span className="activity-percent">{Math.round(job.progress)}%</span>
     </div>
+  );
+}
+
+function MediaPage({ onRefresh }: { onRefresh: () => void }) {
+  const [recordings, setRecordings] = useState<Recording[]>([]);
+  const [jobs, setJobs] = useState<QueueJob[]>([]);
+  const [path, setPath] = useState("");
+  const [authorized, setAuthorized] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [pageError, setPageError] = useState<string | null>(null);
+  const [analysis, setAnalysis] = useState<RecordingAnalysis | null>(null);
+  const [selectedAnalysisId, setSelectedAnalysisId] = useState<string | null>(null);
+  const [analyzingId, setAnalyzingId] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      const [nextRecordings, nextJobs] = await Promise.all([
+        api<Recording[]>("/api/recordings"),
+        api<QueueJob[]>("/api/jobs"),
+      ]);
+      setRecordings(nextRecordings);
+      setJobs(nextJobs);
+      setPageError(null);
+    } catch (reason) {
+      setPageError(reason instanceof Error ? reason.message : "The media library could not be loaded.");
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 3500);
+    return () => window.clearInterval(timer);
+  }, [refresh]);
+
+  const browse = async () => {
+    setBusy(true);
+    setMessage(null);
+    setPageError(null);
+    try {
+      const result = await api<{ path: string | null }>("/api/recordings/browse", { method: "POST", body: "{}" });
+      if (result.path) setPath(result.path);
+    } catch (reason) {
+      setPageError(reason instanceof Error ? reason.message : "The file picker could not be opened.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const importRecording = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setBusy(true);
+    setMessage(null);
+    setPageError(null);
+    try {
+      const result = await api<{ recording_id: string; job_id: string; display_name: string }>("/api/recordings", {
+        method: "POST",
+        body: JSON.stringify({ path, authorized }),
+      });
+      setMessage(`${result.display_name} added to the inspection queue.`);
+      setPath("");
+      setAuthorized(false);
+      await refresh();
+      onRefresh();
+    } catch (reason) {
+      setPageError(reason instanceof Error ? reason.message : "The recording could not be imported.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const retry = async (jobId: string) => {
+    setPageError(null);
+    try {
+      await api<QueueJob>(`/api/jobs/${encodeURIComponent(jobId)}/retry`, { method: "POST", body: "{}" });
+      setMessage("The failed job was queued again.");
+      await refresh();
+      onRefresh();
+    } catch (reason) {
+      setPageError(reason instanceof Error ? reason.message : "The job could not be retried.");
+    }
+  };
+
+  const startAnalysis = async (recording: Recording) => {
+    setAnalyzingId(recording.id);
+    setMessage(null);
+    setPageError(null);
+    try {
+      const result = await api<{ id: string; existing: boolean }>(`/api/recordings/${encodeURIComponent(recording.id)}/analyze`, { method: "POST", body: "{}" });
+      setMessage(result.existing ? "This recording is already in the analysis queue." : `Analysis queued for ${recording.display_name}. The first run downloads the selected model; transcription then runs locally.`);
+      setSelectedAnalysisId(null);
+      setAnalysis(null);
+      await refresh();
+      onRefresh();
+    } catch (reason) {
+      setPageError(reason instanceof Error ? reason.message : "Analysis could not be queued.");
+    } finally {
+      setAnalyzingId(null);
+    }
+  };
+
+  const viewAnalysis = async (recordingId: string) => {
+    setSelectedAnalysisId(recordingId);
+    setAnalysis(null);
+    setPageError(null);
+    try {
+      setAnalysis(await api<RecordingAnalysis>(`/api/recordings/${encodeURIComponent(recordingId)}/analysis`));
+    } catch (reason) {
+      setPageError(reason instanceof Error ? reason.message : "Analysis could not be loaded.");
+    }
+  };
+
+  return (
+    <>
+      <section className="page-heading media-heading">
+        <div><div className="eyebrow"><span className="eyebrow-line" /> LOCAL SOURCE LIBRARY</div><h1>Media library<span className="heading-period">.</span></h1><p className="heading-subtitle">Add a recording to inspect its streams and prepare it for analysis.</p></div>
+        <button className="secondary-button" onClick={() => void refresh()}><RefreshCw size={14} /> Refresh library</button>
+      </section>
+
+      {pageError && <div className="error-banner media-error"><AlertTriangle size={17} /><span>{pageError}</span></div>}
+      {message && <div className="success-banner"><Check size={16} /><span>{message}</span><button aria-label="Dismiss message" onClick={() => setMessage(null)}>×</button></div>}
+
+      <section className="surface-card import-card">
+        <div className="import-card-header">
+          <div className="import-icon"><Upload size={18} /></div>
+          <div><div className="section-overline">ADD LOCAL RECORDING</div><h3>Bring a session into your studio</h3><p>The original stays at its current path. ClipForge only reads it and stores its own metadata.</p></div>
+        </div>
+        <form onSubmit={(event) => void importRecording(event)}>
+          <div className="path-entry-row">
+            <label className="sr-only" htmlFor="recording-path">Video file path</label>
+            <input id="recording-path" type="text" autoComplete="off" spellCheck={false} value={path} onChange={(event) => setPath(event.target.value)} placeholder="Paste a local path or browse for a recording" />
+            <button type="button" className="secondary-button browse-button" onClick={() => void browse()} disabled={busy}><HardDrive size={14} /> Browse files</button>
+          </div>
+          <div className="import-actions-row">
+            <label className="authorization-check"><input type="checkbox" checked={authorized} onChange={(event) => setAuthorized(event.target.checked)} /><span className="checkmark"><Check size={12} /></span><span>I own this recording or have permission to use it.</span></label>
+            <button className="primary-button import-submit" type="submit" disabled={!path.trim() || !authorized || busy}>{busy ? <LoaderCircle className="spin" size={15} /> : <Upload size={15} />}{busy ? "Working…" : "Add recording"}<ArrowUpRight size={14} /></button>
+          </div>
+        </form>
+        <div className="import-footnote"><ShieldCheck size={14} /><span>Authorization is required before processing. This confirmation does not clear rights to third-party music or game assets.</span></div>
+      </section>
+
+      <div className="media-columns">
+        <section className="surface-card library-card">
+          <div className="section-header">
+            <div><div className="section-overline">SOURCE FILES</div><h3>Recordings <span className="count-badge">{recordings.length}</span></h3></div>
+            <span className="library-local-tag"><span /> Stored locally</span>
+          </div>
+          {recordings.length ? <div className="recording-list">
+            {recordings.map((recording) => <div className="recording-row" key={recording.id}>
+              <div className="recording-thumb"><MonitorPlay size={19} /></div>
+              <div className="recording-copy"><strong title={recording.display_name}>{recording.display_name}</strong><span title={recording.file_path}>{recording.file_path}</span></div>
+              <div className="recording-meta"><span>{formatDuration(recording.duration_seconds)}</span><small>{recording.metadata?.video?.width && recording.metadata?.video?.height ? `${recording.metadata.video.width} × ${recording.metadata.video.height}` : "Awaiting probe"}</small></div>
+              <span className={`recording-state state-${recording.status}`}>{recording.status.replaceAll("_", " ")}</span>
+              <div className="recording-actions">
+                {recording.transcript_model && <button className="row-action-button" onClick={() => void viewAnalysis(recording.id)}>View results</button>}
+                {jobs.some((job) => job.recording_id === recording.id && job.job_type === "analyze_recording" && ["queued", "running", "paused"].includes(job.status))
+                  ? <span className="analysis-running"><LoaderCircle size={12} className="spin" /> Analysis queued</span>
+                  : <button className="row-action-button analyze-action" disabled={analyzingId === recording.id || !["ready", "analyzed"].includes(recording.status) && !(recording.status === "failed" && Boolean(recording.metadata))} onClick={() => void startAnalysis(recording)}>{analyzingId === recording.id ? <LoaderCircle size={12} className="spin" /> : <Sparkles size={12} />}{recording.transcript_model ? "Re-analyze" : "Analyze"}</button>}
+              </div>
+            </div>)}
+          </div> : <div className="library-empty"><div className="empty-icon"><MonitorPlay size={20} /></div><strong>No recordings added</strong><p>Choose an authorized video file to create your first local source entry.</p></div>}
+        </section>
+
+        <section className="surface-card queue-card">
+          <div className="section-header"><div><div className="section-overline">BACKGROUND WORK</div><h3>Inspection queue <span className="count-badge">{jobs.length}</span></h3></div><Activity size={16} className="queue-header-icon" /></div>
+          {jobs.length ? <div className="queue-list">{jobs.map((job) => <div className="queue-row" key={job.id}>
+            <div className={`queue-icon status-${job.status}`}><Clapperboard size={15} /></div>
+            <div className="queue-copy"><strong>{job.recording_name || "Recording"}</strong><span>{job.stage.replaceAll("_", " ")}{job.error_message ? ` · ${job.error_message}` : ""}</span><div className="progress-track"><span style={{ width: `${Math.max(0, Math.min(job.progress, 100))}%` }} /></div></div>
+            <div className="queue-status-wrap"><span className={`job-status status-${job.status}`}>{job.status}</span>{job.status === "failed" && <button className="retry-button" onClick={() => void retry(job.id)}>Retry</button>}</div>
+          </div>)}</div> : <div className="queue-empty"><div className="empty-icon"><Activity size={18} /></div><strong>Queue is clear</strong><p>Imported recordings will be inspected in the background.</p></div>}
+          <div className="queue-footer"><span><span className="queue-live-dot" /> Updates automatically</span><span>{jobs.filter((job) => job.status === "running").length} running</span></div>
+        </section>
+      </div>
+      {selectedAnalysisId && <section className="surface-card analysis-results" aria-live="polite">
+        {!analysis ? <div className="analysis-loading"><LoaderCircle className="spin" size={18} /> Loading transcription and highlights…</div> : <>
+          <div className="analysis-header">
+            <div><div className="section-overline">TRANSCRIPTION & SIGNAL ANALYSIS</div><h3>{recordings.find((item) => item.id === selectedAnalysisId)?.display_name ?? "Recording analysis"}</h3><p>Generated locally with {analysis.transcript?.model_name ?? "faster-whisper"} · {analysis.transcript?.language?.toUpperCase() ?? "Language undetected"} · {analysis.transcript?.device ?? "CPU"}</p></div>
+            <div className="analysis-header-actions"><a className="secondary-button subtitle-link" href={`/api/recordings/${encodeURIComponent(selectedAnalysisId)}/subtitles`} download><Upload size={13} /> Download SRT</a><button className="icon-button close-analysis" onClick={() => { setSelectedAnalysisId(null); setAnalysis(null); }} aria-label="Close analysis">×</button></div>
+          </div>
+          <div className="analysis-summary"><span><strong>{analysis.transcript?.segments.length ?? 0}</strong> transcript segments</span><span><strong>{analysis.candidates.length}</strong> ranked candidates</span><span><strong>{analysis.analysis?.scene_cuts.length ?? 0}</strong> scene changes</span><span>Model: <strong>{analysis.transcript?.model_name}</strong> · CPU int8</span></div>
+          <div className="candidate-section-heading"><div><div className="section-overline">HUMAN REVIEW</div><h4>Candidate highlights</h4></div><span>Scores rank signals; review before making clips.</span></div>
+          {analysis.candidates.length ? <div className="candidate-list">{analysis.candidates.map((candidate, index) => {
+            const excerpt = analysis.transcript?.segments.filter((segment) => segment.end > candidate.start_seconds && segment.start < candidate.end_seconds).slice(0, 5) ?? [];
+            return <article className="candidate-card" key={candidate.id}>
+              <div className="candidate-rank">{String(index + 1).padStart(2, "0")}</div>
+              <div className="candidate-body"><div className="candidate-topline"><h4>{candidate.title}</h4><span className="candidate-score">{candidate.score.toFixed(0)}<small>/100</small></span></div>
+                <div className="candidate-meta"><span><Clapperboard size={12} /> {formatDuration(candidate.start_seconds)}–{formatDuration(candidate.end_seconds)}</span>{candidate.reasons.map((reason) => <span className="reason-chip" key={reason}>{reason}</span>)}</div>
+                {excerpt.length ? <p className="candidate-excerpt">{excerpt.map((segment) => segment.text).join(" ")}</p> : <p className="candidate-excerpt muted-excerpt">No speech detected in this candidate window.</p>}
+              </div>
+              <div className="candidate-signals"><span>Audio <b>{Math.round(candidate.signals.audio_energy * 100)}%</b></span><span>Speech <b>{Math.round(candidate.signals.speech_density * 100)}%</b></span><span>Scene cuts <b>{candidate.signals.scene_changes}</b></span></div>
+            </article>;
+          })}</div> : <div className="no-candidates"><div className="empty-icon"><Sparkles size={18} /></div><div><strong>No clear highlight candidates found</strong><p>The recording was transcribed, but its audio, transcript, and scene signals did not pass the candidate threshold.</p></div></div>}
+          <details className="full-transcript"><summary>Full transcript <span>{analysis.transcript?.segments.length ?? 0} segments</span></summary>{analysis.transcript?.segments.length ? <div className="transcript-list">{analysis.transcript.segments.map((segment, index) => <div className="transcript-line" key={`${segment.start}-${index}`}><time>{formatDuration(segment.start)}</time><span>{segment.text}</span></div>)}</div> : <p className="transcript-empty">No speech was recognized in this recording.</p>}</details>
+        </>}
+      </section>}
+    </>
   );
 }
 
@@ -444,7 +703,13 @@ function SettingsPage({ settings, system, saved, saveSettings, loading }: {
                 {[50, 60, 70, 75, 80, 90].map((value) => <option key={value} value={value}>{value}%</option>)}
               </select>
             </div>
-            <div className="settings-footnote"><Cpu size={14} /> GPU acceleration will be selected only after a hardware and runtime check.</div>
+            <div className="setting-control-row">
+              <div className="setting-control-copy"><strong>Transcription model</strong><small>First use downloads it; transcription runs locally on CPU.</small></div>
+              <select value={settings.transcription_model} onChange={(event) => void saveSettings({ transcription_model: event.target.value as Settings["transcription_model"] })}>
+                <option value="tiny">Tiny · fastest</option><option value="base">Base · balanced</option><option value="small">Small · more accurate</option>
+              </select>
+            </div>
+            <div className="settings-footnote"><Cpu size={14} /> Transcription uses CPU int8 to leave the 4 GB GPU available to the desktop and local LLM.</div>
           </section>
 
           <section className="surface-card settings-card control-card">

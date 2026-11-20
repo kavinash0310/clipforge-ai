@@ -33,7 +33,25 @@ The UI is a Vite-built React application. During development, Vite proxies `/api
 - **Verification:** Compare reported hardware and tool versions with Windows settings and direct command output.
 - **Interview explanation:** “Hardware selection is based on runtime capabilities, with safe failure when a tool is absent.”
 
+### Local transcription and subtitles
+
+- **What / why:** Converts speech in a recording to timestamped text and an SRT file for caption correction.
+- **How:** FFmpeg extracts a temporary mono 16 kHz WAV. faster-whisper loads Tiny, Base, or Small with CPU `int8`, iterates timestamped segments, and writes transcript JSON/SRT atomically per recording. Temporary audio is removed when the job ends.
+- **Technology:** faster-whisper/CTranslate2 and FFmpeg. PyAV is constrained below version 19 while the currently released faster-whisper decoder uses the older `av.open` signature.
+- **Alternatives:** whisper.cpp, another local ASR runtime, or SRT-only caption export.
+- **Verification:** Run a spoken recording through the queue; check recognized text, segment timings, SRT output, and the analysis API response.
+- **Interview explanation:** “The original media remains read-only. A temporary standardized audio stream makes inference predictable; transcript artifacts and progress are persisted separately.”
+
+### Deterministic highlight ranking
+
+- **What / why:** Surfaces promising timestamp ranges without depending on an LLM to inspect every moment.
+- **How:** One-second RMS audio buckets, transcript speech density and excitement cues, and FFmpeg scene cuts feed a weighted score. Context windows surround activity; highly overlapping candidates are suppressed; the best candidates include signal breakdowns and reason labels.
+- **Technology:** Python signal summaries, FFmpeg scene selection, SQLite candidate rows.
+- **Alternatives:** OpenCV visual features, a learned highlight model, game-specific event detectors, or local-LLM context as an additional signal.
+- **Verification:** Unit checks cover context, score ordering, overlap selection, flat-signal rejection, and an end-to-end synthetic spoken recording.
+- **Interview explanation:** “The ranking is explainable and repeatable; transcript excerpts and signal reasons show why a moment ranked highly, while a person decides whether it is entertaining.”
+
 ## Processing design for later milestones
 
-Processing will be a persisted job pipeline, not a request that holds an HTTP connection open. Each stage writes status and progress; retries are bounded and errors remain visible. Deterministic audio/scene features supply candidate events; transcription and optional local-LLM context enrich and rank them. The approval workflow remains a distinct boundary before upload.
+Processing is a persisted job pipeline, not a request that holds an HTTP connection open. Each stage writes status and progress; retries are bounded and errors remain visible. Audio and scene features supply candidate events; the transcript adds context and excitement cues. The approval workflow remains a distinct boundary before upload.
 

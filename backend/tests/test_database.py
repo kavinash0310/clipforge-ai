@@ -6,10 +6,14 @@ from pathlib import Path
 
 from clipforge.database import (
     DEFAULT_SETTINGS,
+    create_analysis_job,
+    create_recording,
     database_session,
+    get_recording_analysis,
     initialize_database,
     read_overview,
     read_settings,
+    save_analysis_result,
     write_settings,
 )
 
@@ -39,6 +43,47 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(settings["automation_mode"], "manual")
         self.assertTrue(settings["emergency_stop"])
         self.assertEqual(settings["max_concurrent_jobs"], 1)
+
+    def test_analysis_results_and_candidates_are_persisted(self) -> None:
+        create_recording("recording-analysis", "C:/clips/session.mp4", "session.mp4", True, self.database_path)
+        with database_session(self.database_path) as connection:
+            connection.execute("UPDATE recordings SET status = 'ready', duration_seconds = 18 WHERE id = 'recording-analysis'")
+
+        job = create_analysis_job("recording-analysis", self.database_path)
+        self.assertFalse(job["existing"])
+        active_job = create_analysis_job("recording-analysis", self.database_path)
+        self.assertTrue(active_job["existing"])
+        self.assertEqual(active_job["id"], job["id"])
+
+        result = {
+            "transcript": {
+                "language": "en",
+                "language_probability": 0.98,
+                "model": "tiny",
+                "device": "cpu",
+                "compute_type": "int8",
+                "segments": [{"start": 1.2, "end": 2.8, "text": "No way!", "confidence": -0.2}],
+            },
+            "transcript_path": "C:/data/output/recording-analysis/transcript.json",
+            "subtitle_path": "C:/data/output/recording-analysis/transcript.srt",
+            "audio_profile": {"mean_rms": 0.12, "peak_rms": 0.91, "active_audio_fraction": 0.9, "energy_buckets": [0.1, 0.9]},
+            "scene_cuts": [2.0],
+        }
+        candidates = [{
+            "title": "No way",
+            "start_seconds": 0.0,
+            "end_seconds": 18.0,
+            "score": 81.5,
+            "reasons": ["Excitement cues in transcript"],
+            "signals": {"audio_energy": 0.8, "speech_density": 0.3, "excitement_cues": 1, "scene_changes": 1},
+        }]
+        save_analysis_result("recording-analysis", result, candidates, self.database_path)
+        saved = get_recording_analysis("recording-analysis", self.database_path)
+
+        self.assertEqual(saved["transcript"]["segments"][0]["text"], "No way!")
+        self.assertEqual(saved["analysis"]["candidate_count"], 1)
+        self.assertEqual(saved["candidates"][0]["score"], 81.5)
+        self.assertEqual(saved["candidates"][0]["reasons"], candidates[0]["reasons"])
 
     def test_overview_is_derived_from_database_rows(self) -> None:
         with database_session(self.database_path) as connection:
