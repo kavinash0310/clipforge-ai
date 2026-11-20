@@ -4,7 +4,7 @@
 
 The UI is a Vite-built React application. During development, Vite proxies `/api` to FastAPI. In a production build, FastAPI serves the static bundle and the API from the same loopback origin. The API starts SQLite and creates the local data directories during application startup.
 
-## Phase 1 modules
+## Platform modules
 
 ### Dashboard
 
@@ -51,7 +51,18 @@ The UI is a Vite-built React application. During development, Vite proxies `/api
 - **Verification:** Unit checks cover context, score ordering, overlap selection, flat-signal rejection, and an end-to-end synthetic spoken recording.
 - **Interview explanation:** “The ranking is explainable and repeatable; transcript excerpts and signal reasons show why a moment ranked highly, while a person decides whether it is entertaining.”
 
-## Processing design for later milestones
+## Phase 4: clip generation and caption editing
 
-Processing is a persisted job pipeline, not a request that holds an HTTP connection open. Each stage writes status and progress; retries are bounded and errors remain visible. Audio and scene features supply candidate events; the transcript adds context and excitement cues. The approval workflow remains a distinct boundary before upload.
+### Clip generation and caption editing
+
+- **What / why:** Produces a short vertical MP4 from a ranked candidate and lets the creator correct caption wording and timing before burning it into the video.
+- **How:** A persisted render job references one candidate. The worker seeks and trims the source timestamps, draws the full gameplay frame over a blurred 1080 × 1920 background, burns in an ASS subtitle track with FFmpeg/libass, encodes H.264/AAC, probes the result, and atomically replaces the generated clip. Caption edits are stored as clip-relative segments; an edit invalidates the previous preview until another render succeeds.
+- **Technology:** FFmpeg `libx264`, subtitles/libass, SQLite job state, SRT for portable caption output, and an HTML video player for local preview.
+- **Alternatives:** Center crop with subject tracking, GPU encoding after an encoder preflight, or a timeline editor for frame-level manual cuts.
+- **Verification:** Render a short synthetic video; verify its duration, H.264 codec, 1080 × 1920 dimensions, subtitle burn-in/SRT content, preview and download responses, caption edit/rerender behavior, and original-file hash.
+- **Interview explanation:** “The editor keeps source timestamps separate from clip-relative captions. A worker owns rendering, writes a new output, validates it with ffprobe, then publishes the preview only after successful validation.”
+
+## Pipeline and later milestones
+
+Analysis and rendering run as persisted jobs, not requests that hold an HTTP connection open. Each stage writes status and progress; retries are bounded and errors remain visible. Audio and scene features supply candidate events; transcript edits are stored for each candidate. Human review remains a distinct boundary before later publishing work.
 

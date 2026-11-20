@@ -4,7 +4,7 @@ ClipForge AI is a local-first gaming content studio for turning recordings you o
 
 ## Current status
 
-Phase 1 is complete: dashboard, saved settings, database foundation, and hardware checks. Phase 3 is complete: authorized local import, FFmpeg inspection, faster-whisper transcription, SRT output, and deterministic highlight ranking. Clip rendering, approval, and publishing come later. Dashboard totals are queried from SQLite, so a fresh database shows zero activity rather than sample metrics.
+Phase 1 is complete: dashboard, saved settings, database foundation, and hardware checks. Phase 3 is complete: authorized local import, FFmpeg inspection, faster-whisper transcription, SRT output, and deterministic highlight ranking. Phase 4 is complete: candidate trimming, 9:16 rendering, editable captions, and local preview/download. Metadata, approval, and publishing follow in later milestones. Dashboard totals are queried from SQLite, so a fresh database shows zero activity rather than sample metrics.
 
 ## Run in development
 
@@ -35,7 +35,7 @@ Phase 1 is complete: dashboard, saved settings, database foundation, and hardwar
 
 For a single local server, build the UI with `npm --prefix frontend run build`, then start the API. FastAPI serves the built frontend on port 8000.
 
-## Verify the foundation
+## Verify the backend and UI
 
 ```powershell
 $env:PYTHONPATH = "backend"
@@ -43,7 +43,7 @@ python -m unittest discover -s backend/tests -v
 npm --prefix frontend run build
 ```
 
-The current verification passed seven backend checks, the TypeScript/Vite production build, a complete local transcription/highlight flow using a synthetic spoken recording, and live API/static-dashboard integration.
+The current verification passed ten backend checks, the TypeScript/Vite production build, and an end-to-end synthetic render with caption editing, preview, re-render, and source-file integrity checks.
 
 See [INSTALLATION.md](INSTALLATION.md), [USER_GUIDE.md](USER_GUIDE.md), and [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for current behavior and the next milestones.
 

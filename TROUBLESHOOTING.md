@@ -20,6 +20,10 @@ Start the Ollama app/service and verify its local API on `127.0.0.1:11434`. The 
 
 Reinstall project dependencies with `python -m pip install -r requirements.txt`. faster-whisper 1.2.1 is incompatible with PyAV 19's changed `av.open` signature, so this project constrains PyAV below 19.
 
+## A vertical clip render fails
+
+Check `ffmpeg -hide_banner -encoders` for `libx264` and `ffmpeg -hide_banner -filters` for `subtitles`. Install an FFmpeg build that includes both. Open the failed render job in Media library for FFmpeg's error detail, then retry after correcting the environment or caption timing. The source recording is not modified.
+
 ## First transcription takes a while
 
 The selected Whisper model downloads when you first analyze a recording. The queue shows its current stage. After the model is cached in app data, transcription runs locally without sending recording audio to a hosted service.

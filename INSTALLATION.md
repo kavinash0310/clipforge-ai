@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - Windows 11, Python 3.12, Node.js, and npm.
-- FFmpeg and ffprobe available on `PATH`.
+- FFmpeg and ffprobe available on `PATH`. The FFmpeg build must include `libx264` and the `subtitles` filter (libass) for vertical clip rendering.
 - Optional: NVIDIA driver and Ollama with a local model.
 
 The app is designed to keep its baseline footprint small. Model weights are installed separately by the user and are not included in the repository.
@@ -31,6 +31,8 @@ npm --prefix frontend run dev
 Open `http://127.0.0.1:5173`. For a single local endpoint, build the UI with `npm --prefix frontend run build`, then run the backend and open `http://127.0.0.1:8000`.
 
 The first analysis downloads the selected faster-whisper model into the app data directory. Transcription uses CPU int8. The dependency file constrains PyAV below version 19 because the released faster-whisper decoder still passes an argument removed in PyAV 19.
+
+To check render support, run `ffmpeg -hide_banner -encoders` and confirm `libx264`, then run `ffmpeg -hide_banner -filters` and confirm `subtitles`.
 
 ## Data location
 

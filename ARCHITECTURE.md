@@ -8,18 +8,21 @@
 - Never overwrite source recordings; write generated media separately.
 - Require a person to approve publication unless the creator explicitly changes policy.
 
-## Phase 1 structure
+## Local application structure
 
 ```mermaid
 flowchart TD
     UI[React + TypeScript dashboard\nlocalhost] <-->|REST| API[FastAPI local service]
     API --> DB[(SQLite\nsettings, jobs, media state)]
+    API --> Worker[Persisted job worker]
+    Worker --> FFmpeg[FFmpeg + libass\nclip render]
+    FFmpeg --> Preview[Local MP4 + SRT preview]
     API --> SYS[System probes\nPython, CPU, RAM, disk, GPU, FFmpeg, Ollama]
     API --> FS[Local app data\nSQLite and generated outputs]
     SRC[Original recording paths] -. referenced, not copied .-> API
 ```
 
-## Planned processing path
+## Processing path
 
 ```mermaid
 flowchart LR
@@ -33,7 +36,8 @@ flowchart LR
     Scenes --> Score
     Score --> Review[Ranked candidate review]
     Review --> Render[FFmpeg clip and vertical render]
-    Render --> Approval[Human review and correction]
+    Render --> Preview[Preview and caption correction]
+    Preview --> Approval[Human review and correction]
     Approval --> PublishApproval[Explicit publish approval]
     PublishApproval --> YouTube[YouTube OAuth upload]
 ```
@@ -51,7 +55,7 @@ flowchart LR
 
 ## Operating boundaries
 
-The service binds to loopback. The browser UI uses same-origin API paths in a production build and a narrow localhost proxy in development. SQLite contains application state, not video bytes. The output directory is separate from source directories. YouTube access is an opt-in OAuth integration and is not part of the current phase.
+The service binds to loopback. The browser UI uses same-origin API paths in a production build and a narrow localhost proxy in development. SQLite contains application state, not video bytes. The output directory is separate from source directories. Render jobs reference a reviewed candidate and its clip-relative caption edits; FFmpeg writes a new MP4 and SRT under app data. YouTube access is an opt-in OAuth integration and is not part of the current phase.
 
 Transcription uses CPU `int8` to keep the machine's 4 GB GPU available to the desktop and other local tools. The first analysis downloads the selected faster-whisper model into app data. Candidate scoring is deterministic and combines audio energy, speech context, excitement phrases, and scene-change counts; its score is a ranking aid for human review.
 

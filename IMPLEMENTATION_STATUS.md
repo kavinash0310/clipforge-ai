@@ -17,9 +17,6 @@
 
 ## Upcoming milestones
 
-- Local media import and FFmpeg metadata inspection
-- Transcription, audio/scene signals, and ranked highlight candidates
-- Clip extraction, vertical rendering, subtitles, and editing
 - Metadata, review queue, approval, and removal workflow
 - YouTube OAuth, private upload, retry, duplicate prevention, and analytics
 - Scheduling, resource controls, recovery, and end-to-end documentation
@@ -61,9 +58,29 @@
 - API guards: duplicate imports returned `409`; missing authorization returned `400`; protected subtitle route returned `200` for a completed analysis.
 - Transcription uses a local CPU model; PyAV below 19 is pinned because the released faster-whisper decoder is not compatible with PyAV 19.
 
+## Phase 4 — Clip generation and editing
+
+**Status:** Complete.
+
+- [x] Persisted render jobs linked to reviewed candidate clips, with retry and pause recovery
+- [x] Candidate-relative trim using the original source timestamps
+- [x] Vertical 1080 × 1920 render with blurred backdrop and full gameplay frame
+- [x] Burned-in, styled subtitles plus downloadable clip SRT
+- [x] Caption text and timing correction, add/remove lines, and edit persistence
+- [x] Preview and MP4 download through confined local output routes
+- [x] ffprobe validates output dimensions and duration before marking it ready
+- [x] Original source hash remains unchanged through render and re-render
+
+## Phase 4 verification
+
+- `python -m unittest discover -s backend/tests -v`: 10 tests passed.
+- `npm --prefix frontend run build`: TypeScript check and Vite production build passed.
+- `python -m compileall -q backend/clipforge backend/tests`: passed.
+- Synthetic FFmpeg render: H.264, 1080 × 1920, 3-second output with subtitle burn-in.
+- API/worker integration: queued and completed two renders; preview and SRT returned `200`; edited caption persisted through re-render; source SHA-256 was unchanged.
+
 ## Next
 
-- Phase 4: clip extraction, vertical rendering, subtitle correction, and preview.
 - Phase 5: metadata generation, review and approval workflow, and removal handling.
 - Phase 6: YouTube OAuth and private uploads.
 - Phase 7: scheduling and analytics.

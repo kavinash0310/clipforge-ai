@@ -78,6 +78,7 @@ def initialize_database(database_path: Path | None = None) -> None:
             CREATE TABLE IF NOT EXISTS jobs (
                 id TEXT PRIMARY KEY,
                 recording_id TEXT REFERENCES recordings(id) ON DELETE SET NULL,
+                clip_id TEXT REFERENCES clips(id) ON DELETE SET NULL,
                 job_type TEXT NOT NULL,
                 status TEXT NOT NULL,
                 progress REAL NOT NULL DEFAULT 0,
@@ -122,6 +123,9 @@ def initialize_database(database_path: Path | None = None) -> None:
                 end_seconds REAL NOT NULL DEFAULT 0,
                 reason_json TEXT NOT NULL DEFAULT '[]',
                 signals_json TEXT NOT NULL DEFAULT '{}',
+                subtitle_segments_json TEXT NOT NULL DEFAULT '[]',
+                render_metadata_json TEXT NOT NULL DEFAULT '{}',
+                rendered_at TEXT,
                 status TEXT NOT NULL DEFAULT 'candidate',
                 created_at TEXT NOT NULL
             );
@@ -163,9 +167,15 @@ def initialize_database(database_path: Path | None = None) -> None:
             ("end_seconds", "REAL NOT NULL DEFAULT 0"),
             ("reason_json", "TEXT NOT NULL DEFAULT '[]'"),
             ("signals_json", "TEXT NOT NULL DEFAULT '{}'"),
+            ("subtitle_segments_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("render_metadata_json", "TEXT NOT NULL DEFAULT '{}'"),
+            ("rendered_at", "TEXT"),
         ):
             if name not in clip_columns:
                 connection.execute(f"ALTER TABLE clips ADD COLUMN {name} {declaration}")
+        job_columns = {row["name"] for row in connection.execute("PRAGMA table_info(jobs)").fetchall()}
+        if "clip_id" not in job_columns:
+            connection.execute("ALTER TABLE jobs ADD COLUMN clip_id TEXT REFERENCES clips(id) ON DELETE SET NULL")
         timestamp = utc_now()
         for key, value in DEFAULT_SETTINGS.items():
             connection.execute(
@@ -325,7 +335,7 @@ def list_jobs(limit: int = 30) -> list[dict[str, Any]]:
     with database_session() as connection:
         rows = connection.execute(
             """
-            SELECT jobs.id, jobs.recording_id, jobs.job_type, jobs.status, jobs.progress,
+            SELECT jobs.id, jobs.recording_id, jobs.clip_id, jobs.job_type, jobs.status, jobs.progress,
                    jobs.stage, jobs.error_message, jobs.attempt_count, jobs.created_at,
                    jobs.updated_at, recordings.display_name AS recording_name
             FROM jobs LEFT JOIN recordings ON recordings.id = jobs.recording_id
@@ -339,7 +349,7 @@ def list_jobs(limit: int = 30) -> list[dict[str, Any]]:
 def claim_next_job() -> dict[str, Any] | None:
     with database_session() as connection:
         row = connection.execute(
-            "SELECT id, recording_id, job_type, attempt_count FROM jobs WHERE status = 'queued' ORDER BY created_at LIMIT 1"
+            "SELECT id, recording_id, clip_id, job_type, attempt_count FROM jobs WHERE status = 'queued' ORDER BY created_at LIMIT 1"
         ).fetchone()
         if row is None:
             return None
@@ -350,10 +360,10 @@ def claim_next_job() -> dict[str, Any] | None:
         ).rowcount
         if changed != 1:
             return None
-        connection.execute(
-            "UPDATE recordings SET status = 'processing' WHERE id = ?",
-            (row["recording_id"],),
-        )
+        if row["job_type"] == "render_clip" and row["clip_id"]:
+            connection.execute("UPDATE clips SET status = 'rendering' WHERE id = ?", (row["clip_id"],))
+        else:
+            connection.execute("UPDATE recordings SET status = 'processing' WHERE id = ?", (row["recording_id"],))
         return dict(row)
 
 
@@ -361,34 +371,34 @@ def recover_interrupted_jobs() -> None:
     timestamp = utc_now()
     with database_session() as connection:
         rows = connection.execute(
-            "SELECT DISTINCT recording_id FROM jobs WHERE status = 'running' AND recording_id IS NOT NULL"
+            "SELECT DISTINCT recording_id, clip_id, job_type FROM jobs WHERE status = 'running'"
         ).fetchall()
         connection.execute(
             "UPDATE jobs SET status = 'queued', stage = 'recovered', updated_at = ? WHERE status = 'running'",
             (timestamp,),
         )
         for row in rows:
-            connection.execute(
-                "UPDATE recordings SET status = 'queued' WHERE id = ?",
-                (row["recording_id"],),
-            )
+            if row["job_type"] == "render_clip" and row["clip_id"]:
+                connection.execute("UPDATE clips SET status = 'queued' WHERE id = ?", (row["clip_id"],))
+            elif row["recording_id"]:
+                connection.execute("UPDATE recordings SET status = 'queued' WHERE id = ?", (row["recording_id"],))
 
 
 def resume_paused_jobs() -> None:
     timestamp = utc_now()
     with database_session() as connection:
         rows = connection.execute(
-            "SELECT DISTINCT recording_id FROM jobs WHERE status = 'paused' AND recording_id IS NOT NULL"
+            "SELECT DISTINCT recording_id, clip_id, job_type FROM jobs WHERE status = 'paused'"
         ).fetchall()
         connection.execute(
             "UPDATE jobs SET status = 'queued', stage = 'queued', updated_at = ? WHERE status = 'paused'",
             (timestamp,),
         )
         for row in rows:
-            connection.execute(
-                "UPDATE recordings SET status = 'queued' WHERE id = ?",
-                (row["recording_id"],),
-            )
+            if row["job_type"] == "render_clip" and row["clip_id"]:
+                connection.execute("UPDATE clips SET status = 'queued' WHERE id = ?", (row["clip_id"],))
+            elif row["recording_id"]:
+                connection.execute("UPDATE recordings SET status = 'queued' WHERE id = ?", (row["recording_id"],))
 
 
 def update_job(job_id: str, *, status: str | None = None, progress: float | None = None, stage: str | None = None, error_message: str | None = None) -> None:
@@ -464,13 +474,26 @@ def save_analysis_result(recording_id: str, result: dict[str, Any], candidates: 
         )
         connection.execute("DELETE FROM clips WHERE recording_id = ? AND status = 'candidate'", (recording_id,))
         for candidate in candidates:
+            candidate_start = float(candidate["start_seconds"])
+            candidate_end = float(candidate["end_seconds"])
+            clipped_segments = []
+            for segment in transcript["segments"]:
+                segment_start = max(candidate_start, float(segment["start"]))
+                segment_end = min(candidate_end, float(segment["end"]))
+                if segment_end > segment_start:
+                    clipped_segments.append({
+                        "start": round(segment_start - candidate_start, 3),
+                        "end": round(segment_end - candidate_start, 3),
+                        "text": str(segment.get("text", "")).strip(),
+                    })
             connection.execute(
-                "INSERT INTO clips(id, recording_id, file_path, title, score, start_seconds, end_seconds, reason_json, signals_json, status, created_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, 'candidate', ?)",
+                "INSERT INTO clips(id, recording_id, file_path, title, score, start_seconds, end_seconds, reason_json, signals_json, subtitle_segments_json, status, created_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 'candidate', ?)",
                 (
                     uuid.uuid4().hex, recording_id, candidate["title"], candidate["score"],
                     candidate["start_seconds"], candidate["end_seconds"],
                     json.dumps(candidate["reasons"], ensure_ascii=False),
-                    json.dumps(candidate["signals"], ensure_ascii=False), timestamp,
+                    json.dumps(candidate["signals"], ensure_ascii=False),
+                    json.dumps(clipped_segments, ensure_ascii=False), timestamp,
                 ),
             )
         connection.execute("UPDATE recordings SET status = 'analyzed' WHERE id = ?", (recording_id,))
@@ -490,7 +513,7 @@ def get_recording_analysis(recording_id: str, database_path: Path | None = None)
             (recording_id,),
         ).fetchone()
         clips = connection.execute(
-            "SELECT id, title, score, start_seconds, end_seconds, reason_json, signals_json, status, created_at FROM clips WHERE recording_id = ? AND status = 'candidate' ORDER BY score DESC, start_seconds",
+            "SELECT id, title, score, start_seconds, end_seconds, reason_json, signals_json, subtitle_segments_json, render_metadata_json, rendered_at, status, created_at FROM clips WHERE recording_id = ? ORDER BY score DESC, start_seconds",
             (recording_id,),
         ).fetchall()
     if transcript is None:
@@ -503,6 +526,8 @@ def get_recording_analysis(recording_id: str, database_path: Path | None = None)
         value = dict(row)
         value["reasons"] = json.loads(value.pop("reason_json"))
         value["signals"] = json.loads(value.pop("signals_json"))
+        value["subtitles"] = json.loads(value.pop("subtitle_segments_json"))
+        value["render_metadata"] = json.loads(value.pop("render_metadata_json"))
         candidate_values.append(value)
     return {
         "recording_id": recording_id,
@@ -512,8 +537,8 @@ def get_recording_analysis(recording_id: str, database_path: Path | None = None)
     }
 
 
-def get_job(job_id: str) -> dict[str, Any] | None:
-    with database_session() as connection:
+def get_job(job_id: str, database_path: Path | None = None) -> dict[str, Any] | None:
+    with database_session(database_path) as connection:
         row = connection.execute(
             "SELECT id, recording_id, job_type, status, progress, stage, error_message, attempt_count FROM jobs WHERE id = ?",
             (job_id,),
@@ -521,11 +546,165 @@ def get_job(job_id: str) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
-def retry_job(job_id: str, max_attempts: int = 3) -> dict[str, Any] | None:
-    timestamp = utc_now()
-    with database_session() as connection:
+def _clip_from_row(row: sqlite3.Row) -> dict[str, Any]:
+    clip = dict(row)
+    clip["reasons"] = json.loads(clip.pop("reason_json"))
+    clip["signals"] = json.loads(clip.pop("signals_json"))
+    clip["subtitles"] = json.loads(clip.pop("subtitle_segments_json"))
+    clip["render_metadata"] = json.loads(clip.pop("render_metadata_json"))
+    rendered_file_exists = bool(clip.get("file_path") and Path(clip["file_path"]).is_file())
+    if clip["status"] == "rendered" and not rendered_file_exists:
+        clip["status"] = "failed"
+    clip["preview_url"] = f"/api/clips/{clip['id']}/preview" if clip["status"] == "rendered" and rendered_file_exists else None
+    clip.pop("file_path", None)
+    return clip
+
+
+def list_clips(database_path: Path | None = None) -> list[dict[str, Any]]:
+    with database_session(database_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT clips.id, clips.recording_id, recordings.display_name AS recording_name,
+                   clips.file_path, clips.title, clips.score, clips.start_seconds, clips.end_seconds,
+                   clips.reason_json, clips.signals_json, clips.subtitle_segments_json,
+                   clips.render_metadata_json, clips.rendered_at, clips.status, clips.created_at
+            FROM clips JOIN recordings ON recordings.id = clips.recording_id
+            ORDER BY clips.score DESC, clips.created_at DESC
+            """
+        ).fetchall()
+    return [_clip_from_row(row) for row in rows]
+
+
+def get_clip(clip_id: str, database_path: Path | None = None) -> dict[str, Any] | None:
+    with database_session(database_path) as connection:
         row = connection.execute(
-            "SELECT id, recording_id, status, attempt_count FROM jobs WHERE id = ?",
+            """
+            SELECT clips.id, clips.recording_id, recordings.display_name AS recording_name,
+                   clips.file_path, clips.title, clips.score, clips.start_seconds, clips.end_seconds,
+                   clips.reason_json, clips.signals_json, clips.subtitle_segments_json,
+                   clips.render_metadata_json, clips.rendered_at, clips.status, clips.created_at
+            FROM clips JOIN recordings ON recordings.id = clips.recording_id
+            WHERE clips.id = ?
+            """,
+            (clip_id,),
+        ).fetchone()
+    return _clip_from_row(row) if row else None
+
+
+def get_clip_render_input(clip_id: str, database_path: Path | None = None) -> dict[str, Any] | None:
+    with database_session(database_path) as connection:
+        row = connection.execute(
+            """
+            SELECT clips.id, clips.recording_id, clips.start_seconds, clips.end_seconds,
+                   clips.subtitle_segments_json, clips.status, clips.file_path AS rendered_path,
+                   recordings.file_path,
+                   recordings.duration_seconds, recordings.authorized
+            FROM clips JOIN recordings ON recordings.id = clips.recording_id
+            WHERE clips.id = ?
+            """,
+            (clip_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    return {
+        **dict(row),
+        "authorized": bool(row["authorized"]),
+        "subtitles": json.loads(row["subtitle_segments_json"]),
+    }
+
+
+def create_render_job(clip_id: str, database_path: Path | None = None) -> dict[str, Any]:
+    timestamp = utc_now()
+    with database_session(database_path) as connection:
+        clip = connection.execute(
+            """
+            SELECT clips.status, clips.file_path, clips.recording_id, clips.subtitle_segments_json,
+                   recordings.authorized
+            FROM clips JOIN recordings ON recordings.id = clips.recording_id
+            WHERE clips.id = ?
+            """,
+            (clip_id,),
+        ).fetchone()
+        if clip is None:
+            raise LookupError("Clip candidate not found.")
+        if not clip["authorized"]:
+            raise PermissionError("The source recording has no authorization confirmation.")
+        active = connection.execute(
+            "SELECT id, status FROM jobs WHERE clip_id = ? AND job_type = 'render_clip' AND status IN ('queued', 'running', 'paused') ORDER BY created_at DESC LIMIT 1",
+            (clip_id,),
+        ).fetchone()
+        if active is not None:
+            return {"id": active["id"], "clip_id": clip_id, "status": active["status"], "existing": True}
+        if clip["status"] == "rendered" and clip["file_path"] and Path(clip["file_path"]).is_file():
+            return {"id": None, "clip_id": clip_id, "status": "rendered", "existing": True}
+        job_id = f"job-{uuid.uuid4().hex}"
+        connection.execute(
+            "INSERT INTO jobs(id, recording_id, clip_id, job_type, status, progress, stage, created_at, updated_at) VALUES (?, ?, ?, 'render_clip', 'queued', 0, 'queued', ?, ?)",
+            (job_id, clip["recording_id"], clip_id, timestamp, timestamp),
+        )
+        connection.execute("UPDATE clips SET status = 'queued' WHERE id = ?", (clip_id,))
+    return {"id": job_id, "clip_id": clip_id, "status": "queued", "existing": False}
+
+
+def save_clip_subtitles(clip_id: str, subtitles: list[dict[str, Any]], database_path: Path | None = None) -> dict[str, Any] | None:
+    with database_session(database_path) as connection:
+        clip = connection.execute(
+            "SELECT start_seconds, end_seconds, status FROM clips WHERE id = ?",
+            (clip_id,),
+        ).fetchone()
+        if clip is None:
+            return None
+        active_render = connection.execute(
+            "SELECT 1 FROM jobs WHERE clip_id = ? AND job_type = 'render_clip' AND status IN ('queued', 'running', 'paused') LIMIT 1",
+            (clip_id,),
+        ).fetchone()
+        if clip["status"] in {"queued", "rendering", "paused"} or active_render is not None:
+            raise RuntimeError("Captions cannot be changed while this clip is rendering.")
+        duration = float(clip["end_seconds"] - clip["start_seconds"])
+        normalized = []
+        for segment in subtitles:
+            start = round(float(segment["start"]), 3)
+            end = round(float(segment["end"]), 3)
+            text = " ".join(str(segment["text"]).split())
+            if start < 0 or end <= start or end > duration + 0.05:
+                raise ValueError("Subtitle times must be positive, ordered within the clip, and no later than its end.")
+            if not text:
+                continue
+            normalized.append({"start": start, "end": end, "text": text})
+        normalized.sort(key=lambda segment: (segment["start"], segment["end"]))
+        for previous, current in zip(normalized, normalized[1:]):
+            if current["start"] < previous["end"]:
+                raise ValueError("Subtitle segments cannot overlap. Adjust the timing before saving.")
+        connection.execute(
+            "UPDATE clips SET subtitle_segments_json = ?, status = 'candidate', rendered_at = NULL WHERE id = ?",
+            (json.dumps(normalized, ensure_ascii=False), clip_id),
+        )
+    return get_clip(clip_id, database_path)
+
+
+def set_clip_render_status(
+    clip_id: str,
+    status: str,
+    *,
+    file_path: str | None = None,
+    render_metadata: dict[str, Any] | None = None,
+    database_path: Path | None = None,
+) -> None:
+    with database_session(database_path) as connection:
+        if status == "rendered":
+            connection.execute(
+                "UPDATE clips SET status = ?, file_path = ?, render_metadata_json = ?, rendered_at = ? WHERE id = ?",
+                (status, file_path, json.dumps(render_metadata or {}), utc_now(), clip_id),
+            )
+        else:
+            connection.execute("UPDATE clips SET status = ?, rendered_at = NULL WHERE id = ?", (status, clip_id))
+
+
+def retry_job(job_id: str, max_attempts: int = 3, database_path: Path | None = None) -> dict[str, Any] | None:
+    timestamp = utc_now()
+    with database_session(database_path) as connection:
+        row = connection.execute(
+            "SELECT id, recording_id, clip_id, job_type, status, attempt_count FROM jobs WHERE id = ?",
             (job_id,),
         ).fetchone()
         if row is None or row["status"] != "failed" or row["attempt_count"] >= max_attempts:
@@ -534,9 +713,9 @@ def retry_job(job_id: str, max_attempts: int = 3) -> dict[str, Any] | None:
             "UPDATE jobs SET status = 'queued', progress = 0, stage = 'queued', error_message = NULL, updated_at = ? WHERE id = ?",
             (timestamp, job_id),
         )
-        connection.execute(
-            "UPDATE recordings SET status = 'queued' WHERE id = ?",
-            (row["recording_id"],),
-        )
-    return get_job(job_id)
+        if row["job_type"] == "render_clip" and row["clip_id"]:
+            connection.execute("UPDATE clips SET status = 'queued' WHERE id = ?", (row["clip_id"],))
+        else:
+            connection.execute("UPDATE recordings SET status = 'queued' WHERE id = ?", (row["recording_id"],))
+    return get_job(job_id, database_path)
 

@@ -37,3 +37,15 @@
 - **How to verify:** Unit-test flat-signal rejection, signal contributions, context coverage, ranking, and overlap; inspect signal labels alongside a test clip.
 - **Interview explanation:** “The score is not a claim of entertainment quality: it is a transparent ranking that helps a human find moments faster.”
 
+## Phase 4 engineering notes
+
+### Clip rendering and subtitle correction
+
+- **What:** Trims a candidate range into a vertical MP4, burns in corrected captions, and provides a local preview and downloads.
+- **Why:** Ranked timestamps need a usable short-form output, while caption edits and preview keep the creator in control before later review and publishing.
+- **How:** A render job uses the candidate's source start/end, crops a scaled copy into a blurred 9:16 backdrop, keeps the complete gameplay frame in the foreground, adds a clip-relative ASS track, encodes H.264/AAC, and validates the MP4 with ffprobe. Caption JSON and SRT use timestamps relative to the new clip.
+- **Technology choice:** FFmpeg filters, `libx264`, libass, SQLite job state, and a browser video element keep rendering local and easy to inspect.
+- **Alternatives:** Center-crop with face/object tracking, hardware encoding after a capability check, or a standalone timeline editor.
+- **How to verify:** Render a synthetic recording, compare its output duration and dimensions, review SRT and burned captions, edit a line and re-render, and compare a hash of the original file before and after.
+- **Interview explanation:** “The source video is treated as immutable input. The candidate supplies source timestamps, while caption timing is relative to the trimmed clip; an edit invalidates the preview so stale media is never presented as current.”
+

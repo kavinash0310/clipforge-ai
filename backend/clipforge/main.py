@@ -10,22 +10,27 @@ from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from .config import DATA_DIR
+from .config import DATA_DIR, OUTPUT_DIR
+from .clip_rendering import subtitle_files
 from .database import (
     create_analysis_job,
+    create_render_job,
     create_recording,
+    get_clip_render_input,
     get_recording_analysis,
     get_job,
     initialize_database,
+    list_clips,
     list_jobs,
     list_recordings,
     read_overview,
     read_settings,
     retry_job,
+    save_clip_subtitles,
     write_settings,
 )
 from .media import choose_video_file, validate_video_path
@@ -71,6 +76,31 @@ class SettingsPatch(BaseModel):
 class RecordingImport(BaseModel):
     path: str = Field(min_length=1, max_length=2048)
     authorized: bool
+
+
+class SubtitleSegmentEdit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    start: float = Field(ge=0, le=600)
+    end: float = Field(gt=0, le=600)
+    text: str = Field(max_length=500)
+
+    @field_validator("text")
+    @classmethod
+    def clean_subtitle_text(cls, value: str) -> str:
+        return " ".join(value.split())
+
+    @model_validator(mode="after")
+    def validate_timing(self) -> "SubtitleSegmentEdit":
+        if self.end <= self.start:
+            raise ValueError("Subtitle end time must be after its start time.")
+        return self
+
+
+class SubtitleEdits(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    segments: list[SubtitleSegmentEdit] = Field(max_length=300)
 
 
 @asynccontextmanager
@@ -151,6 +181,77 @@ def recording_subtitles(recording_id: str) -> FileResponse:
     if not subtitle_path.is_relative_to(DATA_DIR.resolve()) or not subtitle_path.is_file():
         raise HTTPException(status_code=404, detail="Subtitle file is unavailable.")
     return FileResponse(subtitle_path, filename=f"{recording_id}.srt", media_type="application/x-subrip")
+
+
+@app.get("/api/clips")
+def clips() -> list[dict[str, Any]]:
+    return list_clips()
+
+
+@app.post("/api/clips/{clip_id}/render", status_code=202)
+def render_clip(clip_id: str) -> dict[str, Any]:
+    try:
+        return create_render_job(clip_id)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+
+
+@app.patch("/api/clips/{clip_id}/subtitles")
+def edit_clip_subtitles(clip_id: str, payload: SubtitleEdits) -> dict[str, Any]:
+    try:
+        result = save_clip_subtitles(
+            clip_id,
+            [segment.model_dump() for segment in payload.segments],
+        )
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    if result is None:
+        raise HTTPException(status_code=404, detail="Clip candidate not found.")
+    return result
+
+
+@app.get("/api/clips/{clip_id}/subtitles")
+def clip_subtitles(clip_id: str) -> Response:
+    clip = get_clip_render_input(clip_id)
+    if clip is None:
+        raise HTTPException(status_code=404, detail="Clip candidate not found.")
+    srt, _ass = subtitle_files(clip["subtitles"])
+    return Response(
+        content=srt,
+        media_type="application/x-subrip",
+        headers={"Content-Disposition": f'attachment; filename="{clip_id}.srt"'},
+    )
+
+
+def _clip_video_response(clip_id: str, *, download: bool) -> FileResponse:
+    clip = get_clip_render_input(clip_id)
+    if clip is None:
+        raise HTTPException(status_code=404, detail="Clip candidate not found.")
+    if clip["status"] != "rendered":
+        raise HTTPException(status_code=404, detail="Rendered clip is not available yet.")
+    output_path = Path(clip["rendered_path"]).resolve() if clip.get("rendered_path") else None
+    if output_path is None or not output_path.is_relative_to(OUTPUT_DIR.resolve()) or not output_path.is_file():
+        raise HTTPException(status_code=404, detail="Rendered clip is not available yet.")
+    return FileResponse(
+        output_path,
+        filename=f"{clip_id}.mp4",
+        media_type="video/mp4",
+        content_disposition_type="attachment" if download else "inline",
+    )
+
+
+@app.get("/api/clips/{clip_id}/preview")
+def clip_preview(clip_id: str) -> FileResponse:
+    return _clip_video_response(clip_id, download=False)
+
+
+@app.get("/api/clips/{clip_id}/download")
+def clip_download(clip_id: str) -> FileResponse:
+    return _clip_video_response(clip_id, download=True)
 
 
 @app.post("/api/recordings/{recording_id}/analyze", status_code=202)

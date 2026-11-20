@@ -1,19 +1,25 @@
 from __future__ import annotations
 
 import tempfile
+import sqlite3
 import unittest
 from pathlib import Path
 
 from clipforge.database import (
     DEFAULT_SETTINGS,
     create_analysis_job,
+    create_render_job,
     create_recording,
+    get_clip_render_input,
     database_session,
     get_recording_analysis,
     initialize_database,
     read_overview,
     read_settings,
+    retry_job,
     save_analysis_result,
+    save_clip_subtitles,
+    set_clip_render_status,
     write_settings,
 )
 
@@ -33,6 +39,44 @@ class DatabaseTests(unittest.TestCase):
 
         self.assertEqual(settings, DEFAULT_SETTINGS)
         self.assertEqual(read_overview(self.database_path)["recordings_total"], 0)
+
+    def test_phase_three_database_is_migrated_without_losing_rows(self) -> None:
+        legacy_path = Path(self.temp_dir.name) / "legacy.db"
+        with sqlite3.connect(legacy_path) as connection:
+            connection.executescript(
+                """
+                CREATE TABLE recordings (
+                    id TEXT PRIMARY KEY, file_path TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL,
+                    duration_seconds REAL, status TEXT NOT NULL DEFAULT 'imported',
+                    authorized INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
+                );
+                CREATE TABLE jobs (
+                    id TEXT PRIMARY KEY, recording_id TEXT REFERENCES recordings(id) ON DELETE SET NULL,
+                    job_type TEXT NOT NULL, status TEXT NOT NULL, progress REAL NOT NULL DEFAULT 0,
+                    stage TEXT NOT NULL DEFAULT 'queued', error_message TEXT,
+                    attempt_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                );
+                CREATE TABLE clips (
+                    id TEXT PRIMARY KEY, recording_id TEXT REFERENCES recordings(id) ON DELETE SET NULL,
+                    file_path TEXT, title TEXT, score REAL, status TEXT NOT NULL DEFAULT 'candidate', created_at TEXT NOT NULL
+                );
+                INSERT INTO recordings VALUES ('legacy-recording', 'C:/clips/legacy.mp4', 'legacy.mp4', 10, 'analyzed', 1, '2026-11-20');
+                INSERT INTO jobs VALUES ('legacy-job', 'legacy-recording', 'analyze_recording', 'complete', 100, 'complete', NULL, 1, '2026-11-20', '2026-11-20');
+                INSERT INTO clips VALUES ('legacy-clip', 'legacy-recording', NULL, 'Legacy moment', 75, 'candidate', '2026-11-20');
+                """
+            )
+        connection.close()
+
+        initialize_database(legacy_path)
+
+        with database_session(legacy_path) as connection:
+            job_columns = {row["name"] for row in connection.execute("PRAGMA table_info(jobs)")}
+            clip_columns = {row["name"] for row in connection.execute("PRAGMA table_info(clips)")}
+            self.assertEqual(connection.execute("SELECT display_name FROM recordings WHERE id = 'legacy-recording'").fetchone()[0], "legacy.mp4")
+            self.assertEqual(connection.execute("SELECT title FROM clips WHERE id = 'legacy-clip'").fetchone()[0], "Legacy moment")
+        self.assertIn("clip_id", job_columns)
+        self.assertIn("subtitle_segments_json", clip_columns)
+        self.assertIn("render_metadata_json", clip_columns)
 
     def test_settings_are_persisted(self) -> None:
         settings = write_settings(
@@ -84,6 +128,38 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(saved["analysis"]["candidate_count"], 1)
         self.assertEqual(saved["candidates"][0]["score"], 81.5)
         self.assertEqual(saved["candidates"][0]["reasons"], candidates[0]["reasons"])
+        self.assertEqual(saved["candidates"][0]["subtitles"], [{"start": 1.2, "end": 2.8, "text": "No way!"}])
+
+        with database_session(self.database_path) as connection:
+            connection.execute("UPDATE jobs SET status = 'complete' WHERE recording_id = 'recording-analysis'")
+        clip_id = saved["candidates"][0]["id"]
+        render_job = create_render_job(clip_id, self.database_path)
+        self.assertFalse(render_job["existing"])
+        self.assertEqual(create_render_job(clip_id, self.database_path)["id"], render_job["id"])
+        render_input = get_clip_render_input(clip_id, self.database_path)
+        self.assertTrue(render_input["authorized"])
+        self.assertEqual(render_input["subtitles"][0]["text"], "No way!")
+
+        with self.assertRaises(RuntimeError):
+            save_clip_subtitles(clip_id, [{"start": 1.0, "end": 2.4, "text": "Unsaved while queued"}], self.database_path)
+        with database_session(self.database_path) as connection:
+            connection.execute("UPDATE jobs SET status = 'complete' WHERE clip_id = ?", (clip_id,))
+        set_clip_render_status(clip_id, "candidate", database_path=self.database_path)
+        edited = save_clip_subtitles(
+            clip_id,
+            [{"start": 1.0, "end": 2.4, "text": "No way, clutch!"}],
+            self.database_path,
+        )
+        self.assertEqual(edited["status"], "candidate")
+        self.assertEqual(edited["subtitles"][0]["text"], "No way, clutch!")
+        with self.assertRaises(ValueError):
+            save_clip_subtitles(clip_id, [{"start": 0, "end": 19, "text": "Out of range"}], self.database_path)
+        with database_session(self.database_path) as connection:
+            connection.execute("UPDATE jobs SET status = 'failed' WHERE id = ?", (render_job["id"],))
+        set_clip_render_status(clip_id, "failed", database_path=self.database_path)
+        retried = retry_job(render_job["id"], database_path=self.database_path)
+        self.assertEqual(retried["status"], "queued")
+        self.assertEqual(get_clip_render_input(clip_id, self.database_path)["status"], "queued")
 
     def test_overview_is_derived_from_database_rows(self) -> None:
         with database_session(self.database_path) as connection:

@@ -32,15 +32,35 @@ Queues transcription and highlight analysis for an inspected, authorized recordi
 
 ## `GET /api/recordings/{recording_id}/analysis`
 
-Returns transcript segments, subtitle path, analysis summary, candidate scores, timestamps, reason labels, and signal breakdowns.
+Returns transcript segments, analysis summary, candidate scores, timestamps, reason labels, signal breakdowns, per-candidate editable captions, and render status/metadata.
 
 ## `GET /api/recordings/{recording_id}/subtitles`
 
 Downloads the SRT generated for the recording. The resolved file must remain inside ClipForge's local data directory.
 
+## `GET /api/clips`
+
+Lists candidates and generated clips with clip-relative caption segments, render status, dimensions/duration when available, and a local preview URL for completed renders. Generated file paths are not exposed.
+
+## `PATCH /api/clips/{clip_id}/subtitles`
+
+Saves clip-relative caption edits. `segments` is an array of `{ "start": 0.0, "end": 1.5, "text": "Caption text" }` values. Segments are sorted by start time; overlaps and out-of-clip times are rejected. Editing is rejected while a render job is active and invalidates the prior preview until re-rendered.
+
+## `POST /api/clips/{clip_id}/render`
+
+Queues an idempotent local `render_clip` job for an authorized candidate. FFmpeg trims the source timestamps, creates a 1080 × 1920 H.264 MP4 with a blurred background behind the full gameplay frame, and burns in the saved captions. The source recording is read-only.
+
+## `GET /api/clips/{clip_id}/preview` and `GET /api/clips/{clip_id}/download`
+
+Stream a completed local MP4 inline for the editor or download it as an attachment. Paths are resolved under the ClipForge output directory.
+
+## `GET /api/clips/{clip_id}/subtitles`
+
+Downloads an SRT generated from the current saved caption edits, including edits made since the last render.
+
 ## `GET /api/jobs`
 
-Returns the local queue with job type, stage, progress, errors, attempts, and recording name.
+Returns the local queue with job type, stage, progress, errors, attempts, recording name, and clip ID for render jobs.
 
 ## `POST /api/jobs/{job_id}/retry`
 
