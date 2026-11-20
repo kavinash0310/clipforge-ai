@@ -49,3 +49,17 @@
 - **How to verify:** Render a synthetic recording, compare its output duration and dimensions, review SRT and burned captions, edit a line and re-render, and compare a hash of the original file before and after.
 - **Interview explanation:** “The source video is treated as immutable input. The candidate supplies source timestamps, while caption timing is relative to the trimmed clip; an edit invalidates the preview so stale media is never presented as current.”
 
+## Phase 5 engineering notes
+
+### Local metadata drafting
+
+- **What:** Drafts searchable clip titles, descriptions, hashtags, and tags using the selected game/category and tone.
+- **Why:** Repetitive metadata work can be reduced without sending clip context to a hosted generation service.
+- **How:** A persisted clip job sends bounded context to a local Ollama endpoint and validates the returned JSON. When Ollama is unavailable or its output is invalid, deterministic templates provide an offline draft. The editor saves creator corrections in SQLite.
+- **Technology choice:** Ollama's localhost API with Python's standard HTTP client, plus offline templates and SQLite persistence.
+- **Alternatives:** Manual writing, hosted generation with an external data boundary, or a different local model server.
+- **How to verify:** Run the metadata unit checks, force the local endpoint unavailable to check fallback, exercise API generation/edit routes, and build the frontend.
+- **Interview explanation:** “Generation is an optional local aid: the persistent job and fallback make the feature useful even when the language model is missing.”
+
+Generated copy should be fact-checked. It does not assess copyright status or assure platform outcomes.
+

@@ -128,7 +128,7 @@ h1 { margin: 0; color: #f0f0f5; font-size: clamp(26px, 2.4vw, 33px); font-weight
 .hero-footer svg { color: #6bc7a5; }
 .hero-footer-divider { width: 3px; height: 3px; background: #5e596a; border-radius: 50%; }
 
-.stats-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 13px; margin-top: 16px; }
+.stats-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 13px; margin-top: 16px; }
 .stat-card { min-height: 137px; padding: 15px 15px 13px; background: #11141b; border: 1px solid #252934; border-radius: 9px; }
 .stat-top { display: flex; align-items: center; justify-content: space-between; }
 .stat-icon { display: grid; width: 29px; height: 29px; place-items: center; border-radius: 8px; }
@@ -410,6 +410,27 @@ h1 { margin: 0; color: #f0f0f5; font-size: clamp(26px, 2.4vw, 33px); font-weight
 .caption-empty { padding: 18px 10px; color: #858c99; font-size: 9px; text-align: center; background: #0c0f15; border: 1px dashed #2b303a; border-radius: 7px; }
 .clip-editor-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 7px; margin-top: 11px; padding-top: 10px; border-top: 1px solid #242832; }
 .clip-editor-actions .primary-button, .clip-editor-actions .secondary-button { min-height: 30px; padding: 7px 10px; font-size: 8px; }
+.metadata-editor { display: flex; flex-direction: column; gap: 9px; margin-top: 15px; padding-top: 13px; border-top: 1px solid #292d38; }
+.metadata-editor-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 9px; }
+.metadata-editor-heading > div { display: flex; flex-direction: column; gap: 4px; }
+.metadata-editor-heading strong { color: #d5d8e1; font-size: 10px; font-weight: 630; }
+.metadata-editor-heading span:not(.section-overline) { color: #818896; font-size: 8px; line-height: 1.45; }
+.metadata-context-row { display: grid; grid-template-columns: minmax(0, 1fr) 122px auto; align-items: end; gap: 7px; }
+.metadata-context-row label, .metadata-field { display: flex; min-width: 0; flex-direction: column; gap: 5px; color: #89909d; font-size: 8px; }
+.metadata-context-row input, .metadata-context-row select, .metadata-field input, .metadata-field textarea { width: 100%; min-height: 31px; padding: 7px 8px; color: #d5d8e2; background: #0c0f15; border: 1px solid #2b303b; border-radius: 6px; font: inherit; font-size: 9px; outline: none; }
+.metadata-context-row select { min-width: 0; }
+.metadata-field textarea { min-height: 70px; resize: vertical; line-height: 1.5; }
+.metadata-context-row input:focus, .metadata-context-row select:focus, .metadata-field input:focus, .metadata-field textarea:focus { border-color: #75619e; box-shadow: 0 0 0 2px #75619e33; }
+.metadata-generate-button { min-height: 31px; padding: 7px 9px; font-size: 8px; white-space: nowrap; }
+.metadata-note { display: flex; align-items: flex-start; gap: 5px; margin: 0; color: #9b91b5; font-size: 8px; line-height: 1.45; }
+.metadata-note svg { flex: 0 0 auto; margin-top: 1px; }
+.metadata-loading { display: flex; align-items: center; gap: 7px; min-height: 52px; color: #8c93a1; font-size: 9px; }
+.metadata-loading svg { color: #b39bed; }
+.metadata-editor-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 8px; border-top: 1px solid #242832; }
+.metadata-editor-actions > span { color: #7e8593; font-size: 8px; }
+.metadata-editor-actions .primary-button { min-height: 30px; padding: 7px 10px; font-size: 8px; }
+.clip-state-complete, .clip-state-draft { color: #71d0aa; background: #1a2c26; border-color: #29493b; }
+.clip-state-generating, .clip-state-running { color: #bfabf5; background: #29213a; border-color: #44365e; }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 50% { opacity: .45; } }
@@ -503,4 +524,8 @@ h1 { margin: 0; color: #f0f0f5; font-size: clamp(26px, 2.4vw, 33px); font-weight
   .clip-caption-editor { padding: 9px; }
   .clip-editor-actions { justify-content: stretch; }
   .clip-editor-actions button { flex: 1; }
+  .metadata-context-row { grid-template-columns: minmax(0, 1fr) 115px; }
+  .metadata-generate-button { grid-column: 1 / -1; }
+  .metadata-editor-actions { align-items: stretch; flex-direction: column; }
+  .metadata-editor-actions .primary-button { width: 100%; }
 }

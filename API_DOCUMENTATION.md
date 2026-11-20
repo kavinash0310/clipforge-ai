@@ -8,7 +8,7 @@ Returns service name, version, and status. Does not expose local paths.
 
 ## `GET /api/overview`
 
-Returns SQLite-derived totals for recordings, ready recordings, clips, active and failed jobs, pending approvals, completed publications, plus the six most recently updated jobs. `updated_at` is the time the snapshot was generated.
+Returns SQLite-derived totals for recordings, ready recordings, clips, active and failed jobs, completed publications, plus the six most recently updated jobs. `updated_at` is the time the snapshot was generated.
 
 ## `GET /api/system`
 
@@ -58,9 +58,17 @@ Stream a completed local MP4 inline for the editor or download it as an attachme
 
 Downloads an SRT generated from the current saved caption edits, including edits made since the last render.
 
+## Clip metadata routes
+
+- `GET /api/clips/{clip_id}/metadata` returns the saved game/category, tone, title, description, hashtags, search tags, generator, status, and any generation note.
+- `POST /api/clips/{clip_id}/metadata/generate` accepts `{"game_name":"Valorant","tone":"hype"}` and queues a `generate_metadata` job. Tone values are `hype`, `funny`, `clean`, or `competitive`. The worker calls the configured local Ollama endpoint, then falls back to offline templates if the model is unavailable or returns invalid output.
+- `PATCH /api/clips/{clip_id}/metadata` saves edited metadata. The request fields are `game_name`, `tone`, `title`, `description`, `hashtags`, and `tags`.
+
+Generated metadata is a draft and must be checked for accuracy. It does not assess copyright status or guarantee platform claim/strike outcomes.
+
 ## `GET /api/jobs`
 
-Returns the local queue with job type, stage, progress, errors, attempts, recording name, and clip ID for render jobs.
+Returns the local queue with job type, stage, progress, errors, attempts, recording name, and clip ID for clip render and metadata jobs.
 
 ## `POST /api/jobs/{job_id}/retry`
 

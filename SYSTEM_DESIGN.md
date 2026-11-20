@@ -62,7 +62,20 @@ The UI is a Vite-built React application. During development, Vite proxies `/api
 - **Verification:** Render a short synthetic video; verify its duration, H.264 codec, 1080 × 1920 dimensions, subtitle burn-in/SRT content, preview and download responses, caption edit/rerender behavior, and original-file hash.
 - **Interview explanation:** “The editor keeps source timestamps separate from clip-relative captions. A worker owns rendering, writes a new output, validates it with ffprobe, then publishes the preview only after successful validation.”
 
+## Phase 5: local clip metadata
+
+### Metadata drafting and editing
+
+- **What / why:** Creates an editable title, description, hashtags, and search tags for a selected candidate, reducing repetitive copywriting while keeping the text reviewable.
+- **How:** The API stores game/category and tone inputs, queues a persisted job tied to the clip, and polls the configured localhost Ollama `/api/generate` endpoint. The prompt contains bounded candidate context and requires a JSON result. Invalid or unavailable model output falls back to deterministic offline templates. Values are normalized and length-limited before they are saved; the UI can edit and save the draft.
+- **Technology:** Python `urllib`, local Ollama, SQLite, FastAPI, React, and a deterministic template fallback.
+- **Alternatives:** Manual copywriting only, a hosted language model, or platform-specific metadata tools. Hosted generation was not selected so clip context stays local.
+- **Verification:** Unit checks cover offline fallback and local-model JSON handling; API/worker integration covers job completion and manual edits; the production frontend build checks the editor UI.
+- **Interview explanation:** “The metadata feature keeps generation local and replaceable: a local model improves phrasing, but a deterministic fallback means the workflow still completes without model availability.”
+
+Generated metadata is a draft. It does not verify ownership or licensing and cannot guarantee that a platform will avoid claims or strikes.
+
 ## Pipeline and later milestones
 
-Analysis and rendering run as persisted jobs, not requests that hold an HTTP connection open. Each stage writes status and progress; retries are bounded and errors remain visible. Audio and scene features supply candidate events; transcript edits are stored for each candidate. Human review remains a distinct boundary before later publishing work.
+Analysis, rendering, and metadata generation run as persisted jobs, not requests that hold an HTTP connection open. Each stage writes status and progress; retries are bounded and errors remain visible. Audio and scene features supply candidate events; transcript edits and metadata drafts are stored with each candidate. Public publishing remains disabled until a later upload integration is configured.
 

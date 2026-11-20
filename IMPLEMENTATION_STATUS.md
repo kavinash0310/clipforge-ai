@@ -17,7 +17,6 @@
 
 ## Upcoming milestones
 
-- Metadata, review queue, approval, and removal workflow
 - YouTube OAuth, private upload, retry, duplicate prevention, and analytics
 - Scheduling, resource controls, recovery, and end-to-end documentation
 
@@ -26,7 +25,7 @@
 - Semi-automatic operation is the default.
 - Source video files must remain untouched.
 - Processing requires explicit source authorization confirmation at import.
-- Public publishing remains disabled until explicit approval is implemented.
+- Public publishing remains disabled until upload integration is configured.
 
 ## Phase 1 verification
 
@@ -79,9 +78,28 @@
 - Synthetic FFmpeg render: H.264, 1080 × 1920, 3-second output with subtitle burn-in.
 - API/worker integration: queued and completed two renders; preview and SRT returned `200`; edited caption persisted through re-render; source SHA-256 was unchanged.
 
+## Phase 5 — Local clip metadata
+
+**Status:** Complete.
+
+- [x] Persisted metadata records associated with candidate clips
+- [x] Background metadata jobs with queue recovery, pause, retry, and progress state
+- [x] Local Ollama generation using supplied game, tone, highlight signals, and caption context
+- [x] Offline template fallback when the local model is unavailable or returns invalid output
+- [x] Editable title, description, hashtags, and search tags in the clip editor
+- [x] Metadata API routes and UI polling/save flow
+- [x] Removed the inactive review-queue placeholder and its empty legacy table during database initialization
+- [x] Kept source authorization confirmation on import; generated metadata makes no copyright or platform-outcome guarantees
+
+## Phase 5 verification
+
+- `python -m unittest discover -s backend/tests -v`: 12 tests passed.
+- `npm --prefix frontend run build`: TypeScript check and Vite production build passed.
+- Synthetic API/worker integration: local-model-unavailable path completed with offline template metadata; manual metadata edit persisted; the overview no longer exposes the inactive queue metric.
+- Fresh and existing empty-database migration checks confirm that the obsolete empty placeholder table is removed.
+
 ## Next
 
-- Phase 5: metadata generation, review and approval workflow, and removal handling.
 - Phase 6: YouTube OAuth and private uploads.
 - Phase 7: scheduling and analytics.
 - Phase 8: integration optimization and documentation completion.

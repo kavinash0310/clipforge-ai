@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -43,7 +43,6 @@ type Overview = {
   clips_total: number;
   jobs_active: number;
   jobs_failed: number;
-  approvals_pending: number;
   published_total: number;
   recent_jobs: Job[];
   updated_at: string;
@@ -101,6 +100,24 @@ type QueueJob = Job & {
   clip_id?: string | null;
 };
 type SubtitleSegment = { start: number; end: number; text: string };
+type MetadataTone = "hype" | "funny" | "clean" | "competitive";
+type ClipMetadataForm = {
+  game_name: string;
+  tone: MetadataTone;
+  title: string;
+  description: string;
+  hashtags: string[];
+  tags: string[];
+};
+type ClipMetadata = ClipMetadataForm & {
+  clip_id: string;
+  provider: string | null;
+  model_name: string | null;
+  status: string;
+  generation_note: string | null;
+  error_message: string | null;
+  updated_at: string | null;
+};
 type Clip = {
   id: string;
   recording_id: string;
@@ -384,8 +401,7 @@ function App() {
               <section className="stats-grid" aria-label="Workspace totals">
                 <StatCard title="Recordings" value={overview?.recordings_total} icon={MonitorPlay} tone="violet" loading={loading} foot={`${overview?.recordings_ready ?? 0} ready to process`} />
                 <StatCard title="Clips created" value={overview?.clips_total} icon={Clapperboard} tone="blue" loading={loading} foot="Generated from your recordings" />
-                <StatCard title="Awaiting review" value={overview?.approvals_pending} icon={ShieldCheck} tone="amber" loading={loading} foot="Human review before publishing" />
-                <StatCard title="Published" value={overview?.published_total} icon={Upload} tone="green" loading={loading} foot="Approved uploads tracked here" />
+                <StatCard title="Published" value={overview?.published_total} icon={Upload} tone="green" loading={loading} foot="Completed uploads tracked here" />
               </section>
 
               <section className="lower-grid">
@@ -493,6 +509,10 @@ function MediaPage({ onRefresh }: { onRefresh: () => void }) {
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const [captionDraft, setCaptionDraft] = useState<SubtitleSegment[]>([]);
   const [clipBusy, setClipBusy] = useState(false);
+  const [metadata, setMetadata] = useState<ClipMetadata | null>(null);
+  const [metadataForm, setMetadataForm] = useState<ClipMetadataForm>({ game_name: "", tone: "hype", title: "", description: "", hashtags: [], tags: [] });
+  const [metadataBusy, setMetadataBusy] = useState(false);
+  const metadataDirty = useRef(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -515,6 +535,31 @@ function MediaPage({ onRefresh }: { onRefresh: () => void }) {
     const timer = window.setInterval(() => void refresh(), 3500);
     return () => window.clearInterval(timer);
   }, [refresh]);
+
+  useEffect(() => {
+    if (!selectedClipId) {
+      setMetadata(null);
+      return;
+    }
+    let cancelled = false;
+    metadataDirty.current = false;
+    setMetadata(null);
+    const loadMetadata = async () => {
+      try {
+        const next = await api<ClipMetadata>(`/api/clips/${encodeURIComponent(selectedClipId)}/metadata`);
+        if (cancelled) return;
+        setMetadata(next);
+        if (!metadataDirty.current) {
+          setMetadataForm({ game_name: next.game_name, tone: next.tone, title: next.title, description: next.description, hashtags: next.hashtags, tags: next.tags });
+        }
+      } catch (reason) {
+        if (!cancelled) setPageError(reason instanceof Error ? reason.message : "Metadata could not be loaded.");
+      }
+    };
+    void loadMetadata();
+    const timer = window.setInterval(() => void loadMetadata(), 3000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [selectedClipId]);
 
   const browse = async () => {
     setBusy(true);
@@ -595,6 +640,22 @@ function MediaPage({ onRefresh }: { onRefresh: () => void }) {
   };
 
   const selectedClip = clips.find((clip) => clip.id === selectedClipId) ?? null;
+  const metadataWorking = Boolean(metadata && ["queued", "running", "generating", "paused"].includes(metadata.status));
+  const metadataFormChanged = Boolean(metadata && JSON.stringify({
+    game_name: metadataForm.game_name,
+    tone: metadataForm.tone,
+    title: metadataForm.title,
+    description: metadataForm.description,
+    hashtags: metadataForm.hashtags,
+    tags: metadataForm.tags,
+  }) !== JSON.stringify({
+    game_name: metadata.game_name,
+    tone: metadata.tone,
+    title: metadata.title,
+    description: metadata.description,
+    hashtags: metadata.hashtags,
+    tags: metadata.tags,
+  }));
   const captionDraftChanged = selectedClip
     ? JSON.stringify(captionDraft) !== JSON.stringify(selectedClip.subtitles)
     : false;
@@ -602,7 +663,67 @@ function MediaPage({ onRefresh }: { onRefresh: () => void }) {
   const editClip = (clip: Clip | RecordingAnalysis["candidates"][number]) => {
     setSelectedClipId(clip.id);
     setCaptionDraft(clip.subtitles.map((segment) => ({ ...segment })));
+    metadataDirty.current = false;
     setPageError(null);
+  };
+
+  const updateMetadata = (patch: Partial<ClipMetadataForm>) => {
+    metadataDirty.current = true;
+    setMetadataForm((current) => ({ ...current, ...patch }));
+  };
+
+  const generateMetadata = async () => {
+    if (!selectedClip) return;
+    setMetadataBusy(true);
+    setPageError(null);
+    metadataDirty.current = false;
+    try {
+      const job = await api<{ id: string; status: string; existing: boolean }>(`/api/clips/${encodeURIComponent(selectedClip.id)}/metadata/generate`, {
+        method: "POST",
+        body: JSON.stringify({ game_name: metadataForm.game_name, tone: metadataForm.tone }),
+      });
+      setMetadata((current) => ({
+        clip_id: selectedClip.id,
+        game_name: metadataForm.game_name,
+        tone: metadataForm.tone,
+        title: current?.title ?? "",
+        description: current?.description ?? "",
+        hashtags: current?.hashtags ?? [],
+        tags: current?.tags ?? [],
+        provider: current?.provider ?? null,
+        model_name: current?.model_name ?? null,
+        generation_note: current?.generation_note ?? null,
+        error_message: null,
+        updated_at: current?.updated_at ?? null,
+        status: job.status,
+      }));
+      setMessage(job.existing ? "Metadata generation is already in the queue." : "Metadata generation queued. It will use local Ollama when available, with an offline template fallback.");
+      await refresh();
+    } catch (reason) {
+      setPageError(reason instanceof Error ? reason.message : "Metadata generation could not be queued.");
+    } finally {
+      setMetadataBusy(false);
+    }
+  };
+
+  const saveMetadata = async () => {
+    if (!selectedClip) return;
+    setMetadataBusy(true);
+    setPageError(null);
+    try {
+      const savedMetadata = await api<ClipMetadata>(`/api/clips/${encodeURIComponent(selectedClip.id)}/metadata`, {
+        method: "PATCH",
+        body: JSON.stringify(metadataForm),
+      });
+      metadataDirty.current = false;
+      setMetadata(savedMetadata);
+      setMetadataForm({ game_name: savedMetadata.game_name, tone: savedMetadata.tone, title: savedMetadata.title, description: savedMetadata.description, hashtags: savedMetadata.hashtags, tags: savedMetadata.tags });
+      setMessage("Clip metadata saved locally.");
+    } catch (reason) {
+      setPageError(reason instanceof Error ? reason.message : "Metadata could not be saved.");
+    } finally {
+      setMetadataBusy(false);
+    }
   };
 
   const updateCaption = (index: number, key: keyof SubtitleSegment, value: string) => {
@@ -746,6 +867,19 @@ function MediaPage({ onRefresh }: { onRefresh: () => void }) {
                   <label className="sr-only" htmlFor={`caption-text-${index}`}>Caption text {index + 1}</label><textarea id={`caption-text-${index}`} maxLength={500} rows={2} value={segment.text} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => updateCaption(index, "text", event.target.value)} />
                 </div>)}</div> : <div className="caption-empty">No speech was detected in this highlight. Add caption lines if needed.</div>}
                 <div className="clip-editor-actions"><button className="secondary-button" disabled={!captionDraftChanged || clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onClick={() => void saveCaptions()}>{clipBusy ? <LoaderCircle size={13} className="spin" /> : <Check size={13} />}{captionDraftChanged ? "Save captions" : "Captions saved"}</button><button className="primary-button" disabled={clipBusy || captionDraftChanged || ["queued", "rendering", "paused", "rendered"].includes(selectedClip.status)} onClick={() => void renderClip()}>{clipBusy ? <LoaderCircle size={13} className="spin" /> : selectedClip.status === "rendered" ? <Check size={13} /> : <Play size={13} />}{selectedClip.status === "rendered" ? "Rendered" : selectedClip.status === "paused" ? "Render paused" : selectedClip.status === "queued" || selectedClip.status === "rendering" ? "Rendering…" : "Render vertical clip"}</button></div>
+                <section className="metadata-editor" aria-label="Clip metadata">
+                  <div className="metadata-editor-heading"><div><div className="section-overline">PHASE 5 · LOCAL METADATA</div><strong>Title, description & tags</strong><span>Generate with local Ollama or use the offline fallback, then edit before saving. The draft avoids copying caption text, but cannot guarantee platform outcomes.</span></div><span className={`clip-state clip-state-${metadata?.status ?? "empty"}`}>{metadata?.status ?? "loading"}</span></div>
+                  {!metadata ? <div className="metadata-loading"><LoaderCircle size={14} className="spin" /> Loading saved metadata…</div> : <>
+                    <div className="metadata-context-row"><label>Game or category<input maxLength={80} value={metadataForm.game_name} disabled={metadataWorking || metadataBusy} onChange={(event) => updateMetadata({ game_name: event.target.value })} placeholder="e.g. Valorant" /></label><label>Tone<select value={metadataForm.tone} disabled={metadataWorking || metadataBusy} onChange={(event) => updateMetadata({ tone: event.target.value as MetadataTone })}><option value="hype">Hype</option><option value="funny">Funny</option><option value="clean">Clean</option><option value="competitive">Competitive</option></select></label><button className="secondary-button metadata-generate-button" disabled={metadataBusy || metadataWorking} onClick={() => void generateMetadata()}>{metadataBusy ? <LoaderCircle size={13} className="spin" /> : <Sparkles size={13} />}{metadataWorking ? "Generating…" : "Generate metadata"}</button></div>
+                    {metadata.error_message && <p className="clip-render-error"><AlertTriangle size={13} />{metadata.error_message}</p>}
+                    {metadata.generation_note && <p className="metadata-note">{metadata.provider === "ollama" ? <Sparkles size={12} /> : <CircleHelp size={12} />}{metadata.generation_note}{metadata.model_name ? ` · ${metadata.model_name}` : ""}</p>}
+                    <label className="metadata-field">Title<input maxLength={100} value={metadataForm.title} disabled={metadataWorking || metadataBusy} onChange={(event) => updateMetadata({ title: event.target.value })} placeholder="Generated title" /></label>
+                    <label className="metadata-field">Description<textarea rows={4} maxLength={5000} value={metadataForm.description} disabled={metadataWorking || metadataBusy} onChange={(event) => updateMetadata({ description: event.target.value })} placeholder="Generated description" /></label>
+                    <label className="metadata-field">Hashtags<input value={metadataForm.hashtags.join(", ")} disabled={metadataWorking || metadataBusy} onChange={(event) => updateMetadata({ hashtags: event.target.value.split(",").map((tag) => tag.trim()).filter(Boolean) })} placeholder="#gaming, #shorts" /></label>
+                    <label className="metadata-field">Search tags<input value={metadataForm.tags.join(", ")} disabled={metadataWorking || metadataBusy} onChange={(event) => updateMetadata({ tags: event.target.value.split(",").map((tag) => tag.trim()).filter(Boolean) })} placeholder="gameplay, match highlight" /></label>
+                    <div className="metadata-editor-actions"><span>{metadata.generation_note ?? "Metadata stays local and can be edited at any time."}</span><button className="primary-button" disabled={metadataBusy || metadataWorking || !metadataForm.title.trim() || !metadataFormChanged && metadata.status !== "empty"} onClick={() => void saveMetadata()}>{metadataBusy ? <LoaderCircle size={13} className="spin" /> : <Check size={13} />}{metadata.status === "empty" ? "Save metadata" : "Save edits"}</button></div>
+                  </>}
+                </section>
               </div>
             </div>
           </section>}
@@ -780,16 +914,16 @@ function SettingsPage({ settings, system, saved, saveSettings, loading }: {
             <div className="settings-card-heading"><div className="settings-card-icon violet"><Activity size={17} /></div><div><h3>Automation mode</h3><p>Choose how much control ClipForge takes during processing.</p></div></div>
             <div className="mode-options">
               {([
-                ["manual", "Manual", "You start and review each step."],
-                ["semi_automatic", "Semi-automatic", "Prepare clips for your approval."],
-                ["automatic", "Automatic", "Follow configured policies."],
+                ["manual", "Manual", "You start each processing step."],
+                ["semi_automatic", "Semi-automatic", "Prepare clips and metadata automatically."],
+                ["automatic", "Automatic", "Follow configured local processing settings."],
               ] as const).map(([value, label, description]) => (
                 <button key={value} className={`mode-option ${settings.automation_mode === value ? "selected" : ""}`} onClick={() => void saveSettings({ automation_mode: value })}>
                   <span className="radio-dot" /><span className="mode-copy"><strong>{label}</strong><small>{description}</small></span>{settings.automation_mode === value && <Check size={15} className="mode-check" />}
                 </button>
               ))}
             </div>
-            <div className="settings-note"><ShieldCheck size={15} /><span>Publishing always requires an explicit approval. Public uploads are disabled by default.</span></div>
+            <div className="settings-note"><ShieldCheck size={15} /><span>Publishing integration is not active. Public uploads are disabled by default.</span></div>
           </section>
 
           <section className="surface-card settings-card">

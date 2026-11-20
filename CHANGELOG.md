@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — Phase 4 clip generation and editing
+## Unreleased — Phase 5 local metadata generation
 
 - Added a local FastAPI service and SQLite database initialization.
 - Added a React/TypeScript dashboard with database-backed workspace totals and honest empty states.
@@ -11,7 +11,9 @@
 - Added deterministic audio/scene candidate ranking and transcript/candidate review in the media library.
 - Added persisted clip render jobs, 1080 × 1920 FFmpeg output with a blurred backdrop, and subtitle burn-in.
 - Added clip-relative caption editing, SRT download, generated preview, and MP4 download.
+- Added persisted clip metadata drafts, local Ollama generation, offline templates, and editable title, description, hashtags, and search tags.
+- Removed the inactive review-queue dashboard placeholder and migrate away the empty legacy table.
 - Pinned PyAV below 19 to keep released faster-whisper compatible.
 - Added project, installation, API, database, security, rights, user, learning, and status documentation.
-- Verified ten backend checks, production UI build, synthetic FFmpeg rendering, caption edits, API preview/download, re-render, and source-file integrity.
+- Verified 12 backend checks, production UI build, synthetic FFmpeg rendering, metadata queue/API fallback and editing, caption edits, preview/download, re-render, and source-file integrity.
 

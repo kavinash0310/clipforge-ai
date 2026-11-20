@@ -4,7 +4,7 @@ ClipForge AI is a local-first gaming content studio for turning recordings you o
 
 ## Current status
 
-Phase 1 is complete: dashboard, saved settings, database foundation, and hardware checks. Phase 3 is complete: authorized local import, FFmpeg inspection, faster-whisper transcription, SRT output, and deterministic highlight ranking. Phase 4 is complete: candidate trimming, 9:16 rendering, editable captions, and local preview/download. Metadata, approval, and publishing follow in later milestones. Dashboard totals are queried from SQLite, so a fresh database shows zero activity rather than sample metrics.
+Phase 1 is complete: dashboard, saved settings, database foundation, and hardware checks. Phase 3 is complete: authorized local import, FFmpeg inspection, faster-whisper transcription, SRT output, and deterministic highlight ranking. Phase 4 is complete: candidate trimming, 9:16 rendering, editable captions, and local preview/download. Phase 5 is complete: local metadata generation and editing with Ollama and an offline fallback. Dashboard totals are queried from SQLite, so a fresh database shows zero activity rather than sample metrics.
 
 ## Run in development
 
@@ -43,7 +43,7 @@ python -m unittest discover -s backend/tests -v
 npm --prefix frontend run build
 ```
 
-The current verification passed ten backend checks, the TypeScript/Vite production build, and an end-to-end synthetic render with caption editing, preview, re-render, and source-file integrity checks.
+The current verification passed 12 backend checks, the TypeScript/Vite production build, and end-to-end synthetic render and metadata API/worker checks. The metadata generator does not assess copyright status or guarantee platform outcomes.
 
 See [INSTALLATION.md](INSTALLATION.md), [USER_GUIDE.md](USER_GUIDE.md), and [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for current behavior and the next milestones.
 

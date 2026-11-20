@@ -20,6 +20,7 @@ from .database import (
     create_analysis_job,
     create_render_job,
     create_recording,
+    get_clip_metadata,
     get_clip_render_input,
     get_recording_analysis,
     get_job,
@@ -30,7 +31,9 @@ from .database import (
     read_overview,
     read_settings,
     retry_job,
+    queue_metadata_generation,
     save_clip_subtitles,
+    save_clip_metadata,
     write_settings,
 )
 from .media import choose_video_file, validate_video_path
@@ -101,6 +104,40 @@ class SubtitleEdits(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     segments: list[SubtitleSegmentEdit] = Field(max_length=300)
+
+
+class MetadataGenerateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    game_name: str = Field(default="", max_length=80)
+    tone: Literal["hype", "funny", "clean", "competitive"] = "hype"
+
+    @field_validator("game_name")
+    @classmethod
+    def clean_game_name(cls, value: str) -> str:
+        return " ".join(value.split())
+
+
+class MetadataEditRequest(MetadataGenerateRequest):
+    title: str = Field(min_length=1, max_length=100)
+    description: str = Field(max_length=5000)
+    hashtags: list[str] = Field(max_length=12)
+    tags: list[str] = Field(max_length=20)
+
+    @field_validator("title")
+    @classmethod
+    def clean_title(cls, value: str) -> str:
+        return " ".join(value.split())
+
+    @field_validator("description")
+    @classmethod
+    def clean_description(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("hashtags", "tags")
+    @classmethod
+    def clean_tag_list(cls, values: list[str]) -> list[str]:
+        return [" ".join(value.split())[:100] for value in values if value.strip()]
 
 
 @asynccontextmanager
@@ -225,6 +262,37 @@ def clip_subtitles(clip_id: str) -> Response:
         media_type="application/x-subrip",
         headers={"Content-Disposition": f'attachment; filename="{clip_id}.srt"'},
     )
+
+
+@app.get("/api/clips/{clip_id}/metadata")
+def clip_metadata(clip_id: str) -> dict[str, Any]:
+    result = get_clip_metadata(clip_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Clip candidate not found.")
+    return result
+
+
+@app.post("/api/clips/{clip_id}/metadata/generate", status_code=202)
+def generate_metadata(clip_id: str, payload: MetadataGenerateRequest) -> dict[str, Any]:
+    try:
+        return queue_metadata_generation(clip_id, payload.game_name, payload.tone)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+
+
+@app.patch("/api/clips/{clip_id}/metadata")
+def edit_clip_metadata(clip_id: str, payload: MetadataEditRequest) -> dict[str, Any]:
+    try:
+        result = save_clip_metadata(clip_id, payload.model_dump())
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+    if result is None:
+        raise HTTPException(status_code=404, detail="Clip candidate not found.")
+    return result
 
 
 def _clip_video_response(clip_id: str, *, download: bool) -> FileResponse:

@@ -33,5 +33,14 @@ Rendering uses FFmpeg's `libx264` encoder and subtitles/libass filter. If a rend
 - Pause processing to stop new work from starting.
 - Emergency stop is a separate persisted control that future workers must check before processing or publishing.
 
-Metadata generation, approval, publishing, and analytics are not available yet.
+Publishing and analytics are not available yet.
+
+## Generate clip metadata
+
+1. Open a candidate in Media library and scroll to **Title, description & tags** in the clip editor.
+2. Enter a game or category and choose a tone, then select **Generate metadata**.
+3. ClipForge uses the configured local Ollama model when available. If Ollama is unavailable or returns invalid output, it creates a short offline template instead. No clip media is sent to a hosted metadata service.
+4. Review and edit the title, description, hashtags, and search tags, then select **Save edits**. The metadata is stored locally with the clip.
+
+Generated copy is a draft based on the clip context; verify that it accurately describes the video. Metadata generation does not determine copyright status or guarantee protection from platform claims or strikes. The source authorization check at import remains required.
 

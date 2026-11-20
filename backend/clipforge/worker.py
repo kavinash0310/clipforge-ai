@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import time
@@ -8,6 +9,8 @@ from typing import Any
 
 from .database import (
     claim_next_job,
+    complete_clip_metadata,
+    get_clip_generation_input,
     get_clip_render_input,
     get_recording_analysis,
     read_settings,
@@ -16,6 +19,7 @@ from .database import (
     resume_paused_jobs,
     save_recording_metadata,
     set_clip_render_status,
+    set_clip_metadata_status,
     update_job,
     update_recording_status,
 )
@@ -24,6 +28,7 @@ from .clip_rendering import render_vertical_clip
 from .media import probe_video, validate_video_path
 from .highlights import generate_highlights
 from .transcription import transcribe_recording
+from .metadata import generate_clip_metadata
 
 
 logger = logging.getLogger("clipforge.worker")
@@ -43,7 +48,7 @@ def _process_job(job: dict[str, Any]) -> None:
     job_id = job["id"]
     recording_id = job["recording_id"]
     try:
-        if job["job_type"] not in {"inspect_recording", "analyze_recording", "render_clip"}:
+        if job["job_type"] not in {"inspect_recording", "analyze_recording", "render_clip", "generate_metadata"}:
             raise RuntimeError(f"Unsupported job type: {job['job_type']}")
 
         from .database import list_recordings
@@ -59,11 +64,13 @@ def _process_job(job: dict[str, Any]) -> None:
             update_job(job_id, status="paused", stage="paused", progress=0)
             if job["job_type"] == "render_clip" and job.get("clip_id"):
                 set_clip_render_status(job["clip_id"], "paused")
+            elif job["job_type"] == "generate_metadata" and job.get("clip_id"):
+                set_clip_metadata_status(job["clip_id"], "paused")
             else:
                 update_recording_status(recording_id, "ready" if job["job_type"] == "analyze_recording" else "queued")
             return
 
-        path = validate_video_path(recording["file_path"])
+        path = validate_video_path(recording["file_path"]) if job["job_type"] != "generate_metadata" else None
         if job["job_type"] == "inspect_recording":
             update_job(job_id, stage="probing", progress=12)
             metadata = probe_video(path)
@@ -103,7 +110,7 @@ def _process_job(job: dict[str, Any]) -> None:
             )
             save_analysis_result(recording_id, result, candidates)
             update_job(job_id, status="complete", stage="complete", progress=100, error_message="")
-        else:
+        elif job["job_type"] == "render_clip":
             clip_id = job.get("clip_id")
             if not clip_id:
                 raise RuntimeError("The render job is missing its candidate clip.")
@@ -134,10 +141,32 @@ def _process_job(job: dict[str, Any]) -> None:
                 render_metadata={key: value for key, value in rendered.items() if key != "file_path" and key != "subtitle_path"},
             )
             update_job(job_id, status="complete", stage="complete", progress=100, error_message="")
+        else:
+            clip_id = job.get("clip_id")
+            if not clip_id:
+                raise RuntimeError("The metadata job is missing its candidate clip.")
+            clip = get_clip_generation_input(clip_id)
+            if clip is None or not clip["authorized"]:
+                raise RuntimeError("The authorized candidate context is unavailable.")
+            payload = json.loads(job.get("payload_json") or "{}")
+            settings = read_settings()
+            update_job(job_id, stage="generating_metadata", progress=20)
+            generated = generate_clip_metadata(
+                clip=clip,
+                game_name=payload.get("game_name", ""),
+                tone=payload.get("tone", "hype"),
+                ollama_url=settings["ollama_url"],
+                ollama_model=settings["ollama_model"],
+            )
+            _ensure_not_paused()
+            complete_clip_metadata(clip_id, generated)
+            update_job(job_id, status="complete", stage="complete", progress=100, error_message="")
     except PauseRequested:
         update_job(job_id, status="paused", stage="paused", error_message="")
         if job["job_type"] == "render_clip" and job.get("clip_id"):
             set_clip_render_status(job["clip_id"], "paused")
+        elif job["job_type"] == "generate_metadata" and job.get("clip_id"):
+            set_clip_metadata_status(job["clip_id"], "paused")
         elif job["job_type"] == "analyze_recording":
             update_recording_status(recording_id, "ready")
         else:
@@ -147,6 +176,8 @@ def _process_job(job: dict[str, Any]) -> None:
         update_job(job_id, status="failed", stage="failed", error_message=str(error)[:1000])
         if job["job_type"] == "render_clip" and job.get("clip_id"):
             set_clip_render_status(job["clip_id"], "failed")
+        elif job["job_type"] == "generate_metadata" and job.get("clip_id"):
+            set_clip_metadata_status(job["clip_id"], "failed", error_message=str(error)[:1000])
         else:
             current_analysis = get_recording_analysis(recording_id) if job["job_type"] == "analyze_recording" else None
             update_recording_status(recording_id, "analyzed" if current_analysis and current_analysis["transcript"] else "failed")
@@ -168,14 +199,14 @@ async def run_worker() -> None:
         if not settings["emergency_stop"] and not settings["processing_paused"]:
             await asyncio.to_thread(resume_paused_jobs)
             limit = max(1, min(int(settings["max_concurrent_jobs"]), 4))
-            heavy_job_active = any(job_type in {"analyze_recording", "render_clip"} for job_type in active.values())
+            heavy_job_active = any(job_type in {"analyze_recording", "render_clip", "generate_metadata"} for job_type in active.values())
             while len(active) < limit and not heavy_job_active:
                 job = await asyncio.to_thread(claim_next_job)
                 if job is None:
                     break
                 task = asyncio.create_task(asyncio.to_thread(_process_job, job))
                 active[task] = job["job_type"]
-                if job["job_type"] in {"analyze_recording", "render_clip"}:
+                if job["job_type"] in {"analyze_recording", "render_clip", "generate_metadata"}:
                     break
         await asyncio.sleep(0.5)
 

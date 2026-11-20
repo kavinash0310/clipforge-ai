@@ -10,15 +10,19 @@ from clipforge.database import (
     create_analysis_job,
     create_render_job,
     create_recording,
+    complete_clip_metadata,
     get_clip_render_input,
     database_session,
     get_recording_analysis,
+    get_clip_metadata,
     initialize_database,
     read_overview,
     read_settings,
+    queue_metadata_generation,
     retry_job,
     save_analysis_result,
     save_clip_subtitles,
+    save_clip_metadata,
     set_clip_render_status,
     write_settings,
 )
@@ -60,6 +64,10 @@ class DatabaseTests(unittest.TestCase):
                     id TEXT PRIMARY KEY, recording_id TEXT REFERENCES recordings(id) ON DELETE SET NULL,
                     file_path TEXT, title TEXT, score REAL, status TEXT NOT NULL DEFAULT 'candidate', created_at TEXT NOT NULL
                 );
+                CREATE TABLE approvals (
+                    id TEXT PRIMARY KEY, clip_id TEXT NOT NULL REFERENCES clips(id) ON DELETE CASCADE,
+                    status TEXT NOT NULL, reviewer_note TEXT, reviewed_at TEXT, created_at TEXT NOT NULL
+                );
                 INSERT INTO recordings VALUES ('legacy-recording', 'C:/clips/legacy.mp4', 'legacy.mp4', 10, 'analyzed', 1, '2026-11-20');
                 INSERT INTO jobs VALUES ('legacy-job', 'legacy-recording', 'analyze_recording', 'complete', 100, 'complete', NULL, 1, '2026-11-20', '2026-11-20');
                 INSERT INTO clips VALUES ('legacy-clip', 'legacy-recording', NULL, 'Legacy moment', 75, 'candidate', '2026-11-20');
@@ -72,11 +80,13 @@ class DatabaseTests(unittest.TestCase):
         with database_session(legacy_path) as connection:
             job_columns = {row["name"] for row in connection.execute("PRAGMA table_info(jobs)")}
             clip_columns = {row["name"] for row in connection.execute("PRAGMA table_info(clips)")}
+            approvals = connection.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'approvals'").fetchone()
             self.assertEqual(connection.execute("SELECT display_name FROM recordings WHERE id = 'legacy-recording'").fetchone()[0], "legacy.mp4")
             self.assertEqual(connection.execute("SELECT title FROM clips WHERE id = 'legacy-clip'").fetchone()[0], "Legacy moment")
         self.assertIn("clip_id", job_columns)
         self.assertIn("subtitle_segments_json", clip_columns)
         self.assertIn("render_metadata_json", clip_columns)
+        self.assertIsNone(approvals)
 
     def test_settings_are_persisted(self) -> None:
         settings = write_settings(
@@ -161,6 +171,34 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(retried["status"], "queued")
         self.assertEqual(get_clip_render_input(clip_id, self.database_path)["status"], "queued")
 
+        metadata_job = queue_metadata_generation(clip_id, "Valorant", "competitive", self.database_path)
+        self.assertFalse(metadata_job["existing"])
+        self.assertTrue(queue_metadata_generation(clip_id, "Valorant", "competitive", self.database_path)["existing"])
+        self.assertEqual(get_clip_metadata(clip_id, self.database_path)["status"], "queued")
+        with database_session(self.database_path) as connection:
+            connection.execute("UPDATE jobs SET status = 'complete' WHERE id = ?", (metadata_job["id"],))
+        generated = complete_clip_metadata(clip_id, {
+            "title": "Clean retake",
+            "description": "A focused round from the match.",
+            "hashtags": ["#valorant", "#gaming"],
+            "tags": ["Valorant", "competitive gameplay"],
+            "provider": "template",
+            "model_name": None,
+            "generation_note": "Offline metadata template.",
+        }, self.database_path)
+        self.assertEqual(generated["title"], "Clean retake")
+        self.assertEqual(generated["hashtags"], ["#valorant", "#gaming"])
+        edited_metadata = save_clip_metadata(clip_id, {
+            "game_name": "Valorant",
+            "tone": "clean",
+            "title": "Edited title",
+            "description": "Edited description",
+            "hashtags": ["#custom"],
+            "tags": ["custom tag"],
+        }, self.database_path)
+        self.assertEqual(edited_metadata["status"], "draft")
+        self.assertEqual(edited_metadata["provider"], "manual")
+
     def test_overview_is_derived_from_database_rows(self) -> None:
         with database_session(self.database_path) as connection:
             connection.execute(
@@ -175,10 +213,6 @@ class DatabaseTests(unittest.TestCase):
                 "INSERT INTO clips(id, recording_id, title, score, status, created_at) VALUES (?, ?, ?, ?, ?, ?)",
                 ("clip-1", "recording-1", "Test clip", 0.8, "candidate", "2026-11-20T00:01:00+00:00"),
             )
-            connection.execute(
-                "INSERT INTO approvals(id, clip_id, status, created_at) VALUES (?, ?, ?, ?)",
-                ("approval-1", "clip-1", "pending", "2026-11-20T00:01:00+00:00"),
-            )
 
         overview = read_overview(self.database_path)
 
@@ -186,7 +220,6 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(overview["recordings_ready"], 1)
         self.assertEqual(overview["clips_total"], 1)
         self.assertEqual(overview["jobs_active"], 1)
-        self.assertEqual(overview["approvals_pending"], 1)
         self.assertEqual(overview["recent_jobs"][0]["recording_name"], "session.mp4")
 
 

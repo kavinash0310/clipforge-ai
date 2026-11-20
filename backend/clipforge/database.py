@@ -79,6 +79,7 @@ def initialize_database(database_path: Path | None = None) -> None:
                 id TEXT PRIMARY KEY,
                 recording_id TEXT REFERENCES recordings(id) ON DELETE SET NULL,
                 clip_id TEXT REFERENCES clips(id) ON DELETE SET NULL,
+                payload_json TEXT NOT NULL DEFAULT '{}',
                 job_type TEXT NOT NULL,
                 status TEXT NOT NULL,
                 progress REAL NOT NULL DEFAULT 0,
@@ -130,13 +131,20 @@ def initialize_database(database_path: Path | None = None) -> None:
                 created_at TEXT NOT NULL
             );
 
-            CREATE TABLE IF NOT EXISTS approvals (
-                id TEXT PRIMARY KEY,
-                clip_id TEXT NOT NULL REFERENCES clips(id) ON DELETE CASCADE,
-                status TEXT NOT NULL DEFAULT 'pending',
-                reviewer_note TEXT,
-                reviewed_at TEXT,
-                created_at TEXT NOT NULL
+            CREATE TABLE IF NOT EXISTS clip_metadata (
+                clip_id TEXT PRIMARY KEY REFERENCES clips(id) ON DELETE CASCADE,
+                game_name TEXT NOT NULL DEFAULT '',
+                tone TEXT NOT NULL DEFAULT 'hype',
+                title TEXT NOT NULL DEFAULT '',
+                description TEXT NOT NULL DEFAULT '',
+                hashtags_json TEXT NOT NULL DEFAULT '[]',
+                tags_json TEXT NOT NULL DEFAULT '[]',
+                provider TEXT NOT NULL DEFAULT 'template',
+                model_name TEXT,
+                status TEXT NOT NULL DEFAULT 'empty',
+                generation_note TEXT,
+                error_message TEXT,
+                updated_at TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS publish_events (
@@ -155,8 +163,6 @@ def initialize_database(database_path: Path | None = None) -> None:
                 ON jobs(status, updated_at DESC);
             CREATE INDEX IF NOT EXISTS idx_clips_status_created
                 ON clips(status, created_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_approvals_status_created
-                ON approvals(status, created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_publish_events_status_updated
                 ON publish_events(status, updated_at DESC);
             """
@@ -176,6 +182,15 @@ def initialize_database(database_path: Path | None = None) -> None:
         job_columns = {row["name"] for row in connection.execute("PRAGMA table_info(jobs)").fetchall()}
         if "clip_id" not in job_columns:
             connection.execute("ALTER TABLE jobs ADD COLUMN clip_id TEXT REFERENCES clips(id) ON DELETE SET NULL")
+        if "payload_json" not in job_columns:
+            connection.execute("ALTER TABLE jobs ADD COLUMN payload_json TEXT NOT NULL DEFAULT '{}' ")
+        legacy_approval_table = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'approvals'"
+        ).fetchone()
+        if legacy_approval_table is not None:
+            approval_rows = connection.execute("SELECT COUNT(*) AS total FROM approvals").fetchone()["total"]
+            if approval_rows == 0:
+                connection.execute("DROP TABLE approvals")
         timestamp = utc_now()
         for key, value in DEFAULT_SETTINGS.items():
             connection.execute(
@@ -224,9 +239,6 @@ def read_overview(database_path: Path | None = None) -> dict[str, Any]:
             FROM jobs
             """
         ).fetchone()
-        approvals = connection.execute(
-            "SELECT COUNT(*) AS total FROM approvals WHERE status = 'pending'"
-        ).fetchone()
         published = connection.execute(
             "SELECT COUNT(*) AS total FROM publish_events WHERE status = 'complete'"
         ).fetchone()
@@ -247,7 +259,6 @@ def read_overview(database_path: Path | None = None) -> dict[str, Any]:
         "clips_total": clips["total"] or 0,
         "jobs_active": jobs["active"] or 0,
         "jobs_failed": jobs["failed"] or 0,
-        "approvals_pending": approvals["total"] or 0,
         "published_total": published["total"] or 0,
         "recent_jobs": [dict(row) for row in recent_jobs],
         "updated_at": utc_now(),
@@ -349,7 +360,7 @@ def list_jobs(limit: int = 30) -> list[dict[str, Any]]:
 def claim_next_job() -> dict[str, Any] | None:
     with database_session() as connection:
         row = connection.execute(
-            "SELECT id, recording_id, clip_id, job_type, attempt_count FROM jobs WHERE status = 'queued' ORDER BY created_at LIMIT 1"
+            "SELECT id, recording_id, clip_id, payload_json, job_type, attempt_count FROM jobs WHERE status = 'queued' ORDER BY created_at LIMIT 1"
         ).fetchone()
         if row is None:
             return None
@@ -362,6 +373,8 @@ def claim_next_job() -> dict[str, Any] | None:
             return None
         if row["job_type"] == "render_clip" and row["clip_id"]:
             connection.execute("UPDATE clips SET status = 'rendering' WHERE id = ?", (row["clip_id"],))
+        elif row["job_type"] == "generate_metadata" and row["clip_id"]:
+            connection.execute("UPDATE clip_metadata SET status = 'generating', error_message = NULL, updated_at = ? WHERE clip_id = ?", (timestamp, row["clip_id"]))
         else:
             connection.execute("UPDATE recordings SET status = 'processing' WHERE id = ?", (row["recording_id"],))
         return dict(row)
@@ -380,6 +393,8 @@ def recover_interrupted_jobs() -> None:
         for row in rows:
             if row["job_type"] == "render_clip" and row["clip_id"]:
                 connection.execute("UPDATE clips SET status = 'queued' WHERE id = ?", (row["clip_id"],))
+            elif row["job_type"] == "generate_metadata" and row["clip_id"]:
+                connection.execute("UPDATE clip_metadata SET status = 'queued', updated_at = ? WHERE clip_id = ?", (timestamp, row["clip_id"]))
             elif row["recording_id"]:
                 connection.execute("UPDATE recordings SET status = 'queued' WHERE id = ?", (row["recording_id"],))
 
@@ -397,6 +412,8 @@ def resume_paused_jobs() -> None:
         for row in rows:
             if row["job_type"] == "render_clip" and row["clip_id"]:
                 connection.execute("UPDATE clips SET status = 'queued' WHERE id = ?", (row["clip_id"],))
+            elif row["job_type"] == "generate_metadata" and row["clip_id"]:
+                connection.execute("UPDATE clip_metadata SET status = 'queued', updated_at = ? WHERE clip_id = ?", (timestamp, row["clip_id"]))
             elif row["recording_id"]:
                 connection.execute("UPDATE recordings SET status = 'queued' WHERE id = ?", (row["recording_id"],))
 
@@ -540,7 +557,7 @@ def get_recording_analysis(recording_id: str, database_path: Path | None = None)
 def get_job(job_id: str, database_path: Path | None = None) -> dict[str, Any] | None:
     with database_session(database_path) as connection:
         row = connection.execute(
-            "SELECT id, recording_id, job_type, status, progress, stage, error_message, attempt_count FROM jobs WHERE id = ?",
+            "SELECT id, recording_id, clip_id, job_type, status, progress, stage, error_message, attempt_count FROM jobs WHERE id = ?",
             (job_id,),
         ).fetchone()
     return dict(row) if row else None
@@ -700,6 +717,172 @@ def set_clip_render_status(
             connection.execute("UPDATE clips SET status = ?, rendered_at = NULL WHERE id = ?", (status, clip_id))
 
 
+def _clip_metadata_from_row(row: sqlite3.Row) -> dict[str, Any]:
+    metadata = dict(row)
+    metadata["hashtags"] = json.loads(metadata.pop("hashtags_json"))
+    metadata["tags"] = json.loads(metadata.pop("tags_json"))
+    return metadata
+
+
+def get_clip_metadata(clip_id: str, database_path: Path | None = None) -> dict[str, Any] | None:
+    with database_session(database_path) as connection:
+        row = connection.execute(
+            "SELECT clip_id, game_name, tone, title, description, hashtags_json, tags_json, provider, model_name, status, generation_note, error_message, updated_at FROM clip_metadata WHERE clip_id = ?",
+            (clip_id,),
+        ).fetchone()
+        if row is not None:
+            return _clip_metadata_from_row(row)
+        clip = connection.execute("SELECT id FROM clips WHERE id = ?", (clip_id,)).fetchone()
+    if clip is None:
+        return None
+    return {
+        "clip_id": clip_id,
+        "game_name": "",
+        "tone": "hype",
+        "title": "",
+        "description": "",
+        "hashtags": [],
+        "tags": [],
+        "provider": None,
+        "model_name": None,
+        "status": "empty",
+        "generation_note": None,
+        "error_message": None,
+        "updated_at": None,
+    }
+
+
+def get_clip_generation_input(clip_id: str, database_path: Path | None = None) -> dict[str, Any] | None:
+    with database_session(database_path) as connection:
+        row = connection.execute(
+            """
+            SELECT clips.id, clips.title, clips.score, clips.reason_json, clips.signals_json,
+                   clips.subtitle_segments_json, clips.recording_id, recordings.display_name AS recording_name,
+                   recordings.authorized
+            FROM clips JOIN recordings ON recordings.id = clips.recording_id
+            WHERE clips.id = ?
+            """,
+            (clip_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    value = dict(row)
+    value["authorized"] = bool(value["authorized"])
+    value["reasons"] = json.loads(value.pop("reason_json"))
+    value["signals"] = json.loads(value.pop("signals_json"))
+    value["subtitles"] = json.loads(value.pop("subtitle_segments_json"))
+    return value
+
+
+def queue_metadata_generation(
+    clip_id: str,
+    game_name: str,
+    tone: str,
+    database_path: Path | None = None,
+) -> dict[str, Any]:
+    timestamp = utc_now()
+    with database_session(database_path) as connection:
+        clip = connection.execute(
+            "SELECT clips.recording_id, recordings.authorized FROM clips JOIN recordings ON recordings.id = clips.recording_id WHERE clips.id = ?",
+            (clip_id,),
+        ).fetchone()
+        if clip is None:
+            raise LookupError("Clip candidate not found.")
+        if not clip["authorized"]:
+            raise PermissionError("The source recording has no authorization confirmation.")
+        active = connection.execute(
+            "SELECT id, status FROM jobs WHERE clip_id = ? AND job_type = 'generate_metadata' AND status IN ('queued', 'running', 'paused') ORDER BY created_at DESC LIMIT 1",
+            (clip_id,),
+        ).fetchone()
+        if active is not None:
+            return {"id": active["id"], "clip_id": clip_id, "status": active["status"], "existing": True}
+        payload = json.dumps({"game_name": game_name, "tone": tone}, ensure_ascii=False)
+        job_id = f"job-{uuid.uuid4().hex}"
+        connection.execute(
+            "INSERT INTO jobs(id, recording_id, clip_id, payload_json, job_type, status, progress, stage, created_at, updated_at) VALUES (?, ?, ?, ?, 'generate_metadata', 'queued', 0, 'queued', ?, ?)",
+            (job_id, clip["recording_id"], clip_id, payload, timestamp, timestamp),
+        )
+        connection.execute(
+            """
+            INSERT INTO clip_metadata(clip_id, game_name, tone, title, description, hashtags_json, tags_json, provider, status, generation_note, error_message, updated_at)
+            VALUES (?, ?, ?, '', '', '[]', '[]', 'template', 'queued', NULL, NULL, ?)
+            ON CONFLICT(clip_id) DO UPDATE SET game_name = excluded.game_name, tone = excluded.tone,
+                status = 'queued', generation_note = NULL, error_message = NULL, updated_at = excluded.updated_at
+            """,
+            (clip_id, game_name, tone, timestamp),
+        )
+    return {"id": job_id, "clip_id": clip_id, "status": "queued", "existing": False}
+
+
+def save_clip_metadata(clip_id: str, metadata: dict[str, Any], database_path: Path | None = None) -> dict[str, Any] | None:
+    timestamp = utc_now()
+    hashtags = json.dumps(metadata["hashtags"], ensure_ascii=False)
+    tags = json.dumps(metadata["tags"], ensure_ascii=False)
+    with database_session(database_path) as connection:
+        clip = connection.execute(
+            "SELECT recordings.authorized FROM clips JOIN recordings ON recordings.id = clips.recording_id WHERE clips.id = ?",
+            (clip_id,),
+        ).fetchone()
+        if clip is None:
+            return None
+        if not clip["authorized"]:
+            raise PermissionError("The source recording has no authorization confirmation.")
+        active = connection.execute(
+            "SELECT 1 FROM jobs WHERE clip_id = ? AND job_type = 'generate_metadata' AND status IN ('queued', 'running', 'paused') LIMIT 1",
+            (clip_id,),
+        ).fetchone()
+        if active is not None:
+            raise RuntimeError("Metadata cannot be edited while generation is active.")
+        connection.execute(
+            """
+            INSERT INTO clip_metadata(clip_id, game_name, tone, title, description, hashtags_json, tags_json, provider, model_name, status, generation_note, error_message, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'manual', NULL, 'draft', 'Edited locally.', NULL, ?)
+            ON CONFLICT(clip_id) DO UPDATE SET game_name = excluded.game_name, tone = excluded.tone,
+                title = excluded.title, description = excluded.description, hashtags_json = excluded.hashtags_json,
+                tags_json = excluded.tags_json, provider = 'manual', model_name = NULL,
+                status = 'draft', generation_note = 'Edited locally.', error_message = NULL,
+                updated_at = excluded.updated_at
+            """,
+            (
+                clip_id, metadata["game_name"], metadata["tone"], metadata["title"],
+                metadata["description"], hashtags, tags, timestamp,
+            ),
+        )
+    return get_clip_metadata(clip_id, database_path)
+
+
+def complete_clip_metadata(clip_id: str, metadata: dict[str, Any], database_path: Path | None = None) -> dict[str, Any] | None:
+    timestamp = utc_now()
+    with database_session(database_path) as connection:
+        connection.execute(
+            """
+            UPDATE clip_metadata SET title = ?, description = ?, hashtags_json = ?, tags_json = ?,
+                provider = ?, model_name = ?, status = 'complete', generation_note = ?, error_message = NULL,
+                updated_at = ? WHERE clip_id = ?
+            """,
+            (
+                metadata["title"], metadata["description"], json.dumps(metadata["hashtags"], ensure_ascii=False),
+                json.dumps(metadata["tags"], ensure_ascii=False), metadata["provider"], metadata["model_name"],
+                metadata["generation_note"], timestamp, clip_id,
+            ),
+        )
+    return get_clip_metadata(clip_id, database_path)
+
+
+def set_clip_metadata_status(
+    clip_id: str,
+    status: str,
+    *,
+    error_message: str | None = None,
+    database_path: Path | None = None,
+) -> None:
+    with database_session(database_path) as connection:
+        connection.execute(
+            "UPDATE clip_metadata SET status = ?, error_message = ?, updated_at = ? WHERE clip_id = ?",
+            (status, error_message, utc_now(), clip_id),
+        )
+
+
 def retry_job(job_id: str, max_attempts: int = 3, database_path: Path | None = None) -> dict[str, Any] | None:
     timestamp = utc_now()
     with database_session(database_path) as connection:
@@ -715,6 +898,8 @@ def retry_job(job_id: str, max_attempts: int = 3, database_path: Path | None = N
         )
         if row["job_type"] == "render_clip" and row["clip_id"]:
             connection.execute("UPDATE clips SET status = 'queued' WHERE id = ?", (row["clip_id"],))
+        elif row["job_type"] == "generate_metadata" and row["clip_id"]:
+            connection.execute("UPDATE clip_metadata SET status = 'queued', error_message = NULL, updated_at = ? WHERE clip_id = ?", (timestamp, row["clip_id"]))
         else:
             connection.execute("UPDATE recordings SET status = 'queued' WHERE id = ?", (row["recording_id"],))
     return get_job(job_id, database_path)

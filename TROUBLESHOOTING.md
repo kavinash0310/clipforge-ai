@@ -14,7 +14,11 @@ The diagnostics call `nvidia-smi`. Install a compatible NVIDIA driver and verify
 
 ## Ollama shows offline
 
-Start the Ollama app/service and verify its local API on `127.0.0.1:11434`. The app does not download model weights automatically. Confirm the configured model exists with `ollama list`.
+Start the Ollama app/service and verify its local API on `127.0.0.1:11434`. The app does not download model weights automatically. Confirm the configured model exists with `ollama list`. Metadata generation can still finish with offline templates; transcription and rendering do not depend on Ollama.
+
+## Metadata uses an offline template
+
+Confirm the local Ollama endpoint and configured model in Settings. If Ollama is reachable but returns invalid JSON, ClipForge also uses the template fallback. Retry generation after fixing the model, or edit and save the template draft directly. Generated metadata is a draft and cannot guarantee a platform's copyright or enforcement outcome.
 
 ## Transcription fails while decoding audio
 
