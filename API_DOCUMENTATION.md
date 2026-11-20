@@ -66,13 +66,24 @@ Downloads an SRT generated from the current saved caption edits, including edits
 
 Generated metadata is a draft and must be checked for accuracy. It does not assess copyright status or guarantee platform claim/strike outcomes.
 
+## YouTube routes
+
+- `GET /api/youtube/status` reports whether the Desktop OAuth JSON is configured, whether a channel is connected, and any local credential-store error.
+- `POST /api/youtube/connect` starts a system-browser Google OAuth flow and returns `authorization_url`. It uses PKCE, state validation, and a temporary loopback callback bound to `127.0.0.1`.
+- `DELETE /api/youtube/connect` revokes the saved token when reachable and removes the local DPAPI credential blob. Publication history remains in SQLite.
+- `GET /api/youtube/publications` lists publication status, progress, private video links, failures, and cached analytics.
+- `POST /api/clips/{clip_id}/youtube-upload` queues one resumable upload for a completed, authorized clip. Privacy is always `private`. Repeated requests return the existing publication; a failed upload must use `POST /api/jobs/{job_id}/retry` to resume the existing record/session.
+- `POST /api/youtube/analytics/refresh` requests the latest available 28-day views, likes, comments, and shares for completed YouTube publications, saves the per-video result, and returns the updated publication list.
+
+Place a Google Desktop OAuth client JSON at `%LOCALAPPDATA%\ClipForgeAI\client_secrets.json` (or in the configured `CLIPFORGE_DATA_DIR`). Enable YouTube Data API v3 and YouTube Analytics API in its project. The OAuth client file and OAuth grants are user-managed; the app does not include a shared client credential. Google consent is required for the account to grant channel scopes. Upload privacy is explicitly set because `videos.insert` defaults to public when privacy is omitted. See the [Desktop OAuth flow](https://developers.google.com/identity/protocols/oauth2/native-app), [video insert API](https://developers.google.com/youtube/data/reference/rest/v3/videos/insert), and [Analytics reports API](https://developers.google.com/youtube/analytics/reference/reports/query).
+
 ## `GET /api/jobs`
 
-Returns the local queue with job type, stage, progress, errors, attempts, recording name, and clip ID for clip render and metadata jobs.
+Returns the local queue with job type, stage, progress, errors, attempts, recording name, and clip ID for clip render, metadata, and YouTube upload jobs.
 
 ## `POST /api/jobs/{job_id}/retry`
 
-Requeues a failed job while retries remain. Analysis starts over at audio extraction; prior results remain visible until replacement succeeds.
+Requeues a failed job while retries remain. Analysis starts over at audio extraction; interrupted YouTube uploads reuse the protected resumable session and publication record.
 
 ## `GET /api/settings`
 

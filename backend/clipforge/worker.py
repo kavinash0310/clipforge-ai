@@ -5,11 +5,14 @@ import json
 import logging
 import os
 import time
+from pathlib import Path
 from typing import Any
 
 from .database import (
     claim_next_job,
     complete_clip_metadata,
+    complete_youtube_publication,
+    get_clip_youtube_upload_input,
     get_clip_generation_input,
     get_clip_render_input,
     get_recording_analysis,
@@ -20,6 +23,7 @@ from .database import (
     save_recording_metadata,
     set_clip_render_status,
     set_clip_metadata_status,
+    set_youtube_publication_status,
     update_job,
     update_recording_status,
 )
@@ -29,6 +33,7 @@ from .media import probe_video, validate_video_path
 from .highlights import generate_highlights
 from .transcription import transcribe_recording
 from .metadata import generate_clip_metadata
+from .youtube_api import upload_private_video
 
 
 logger = logging.getLogger("clipforge.worker")
@@ -48,7 +53,7 @@ def _process_job(job: dict[str, Any]) -> None:
     job_id = job["id"]
     recording_id = job["recording_id"]
     try:
-        if job["job_type"] not in {"inspect_recording", "analyze_recording", "render_clip", "generate_metadata"}:
+        if job["job_type"] not in {"inspect_recording", "analyze_recording", "render_clip", "generate_metadata", "youtube_upload"}:
             raise RuntimeError(f"Unsupported job type: {job['job_type']}")
 
         from .database import list_recordings
@@ -66,11 +71,17 @@ def _process_job(job: dict[str, Any]) -> None:
                 set_clip_render_status(job["clip_id"], "paused")
             elif job["job_type"] == "generate_metadata" and job.get("clip_id"):
                 set_clip_metadata_status(job["clip_id"], "paused")
+            elif job["job_type"] == "youtube_upload" and job.get("clip_id"):
+                import json
+
+                event_id = json.loads(job.get("payload_json") or "{}").get("event_id")
+                if event_id:
+                    set_youtube_publication_status(event_id, "paused")
             else:
                 update_recording_status(recording_id, "ready" if job["job_type"] == "analyze_recording" else "queued")
             return
 
-        path = validate_video_path(recording["file_path"]) if job["job_type"] != "generate_metadata" else None
+        path = validate_video_path(recording["file_path"]) if job["job_type"] in {"inspect_recording", "analyze_recording", "render_clip"} else None
         if job["job_type"] == "inspect_recording":
             update_job(job_id, stage="probing", progress=12)
             metadata = probe_video(path)
@@ -141,7 +152,7 @@ def _process_job(job: dict[str, Any]) -> None:
                 render_metadata={key: value for key, value in rendered.items() if key != "file_path" and key != "subtitle_path"},
             )
             update_job(job_id, status="complete", stage="complete", progress=100, error_message="")
-        else:
+        elif job["job_type"] == "generate_metadata":
             clip_id = job.get("clip_id")
             if not clip_id:
                 raise RuntimeError("The metadata job is missing its candidate clip.")
@@ -161,12 +172,53 @@ def _process_job(job: dict[str, Any]) -> None:
             _ensure_not_paused()
             complete_clip_metadata(clip_id, generated)
             update_job(job_id, status="complete", stage="complete", progress=100, error_message="")
+        else:
+            clip_id = job.get("clip_id")
+            if not clip_id:
+                raise RuntimeError("The YouTube upload job is missing its candidate clip.")
+            payload = json.loads(job.get("payload_json") or "{}")
+            event_id = payload.get("event_id")
+            if not event_id:
+                raise RuntimeError("The YouTube upload job is missing its publication record.")
+            clip = get_clip_youtube_upload_input(clip_id)
+            if clip is None or not clip["authorized"]:
+                raise RuntimeError("The authorized rendered candidate context is unavailable.")
+            source = Path(clip["rendered_path"]).resolve() if clip.get("rendered_path") else None
+            if source is None or not source.is_relative_to(OUTPUT_DIR.resolve()) or not source.is_file():
+                raise RuntimeError("The rendered clip file is unavailable inside ClipForge output storage.")
+            if clip["clip_status"] != "rendered":
+                raise RuntimeError("Render the clip again before uploading it.")
+            if not clip["upload_title"]:
+                raise RuntimeError("Add a title to the clip metadata before uploading.")
+            from .youtube_api import upload_fields
+
+            title, description, tags = upload_fields(clip)
+
+            def upload_progress(value: float, stage: str) -> None:
+                update_job(job_id, stage=stage, progress=value)
+                set_youtube_publication_status(event_id, "uploading", progress=value)
+
+            result = upload_private_video(
+                event_id=event_id,
+                file_path=source,
+                title=title,
+                description=description,
+                tags=tags,
+                progress=upload_progress,
+                check_cancel=_ensure_not_paused,
+            )
+            complete_youtube_publication(event_id, result["video_id"])
+            update_job(job_id, status="complete", stage="complete", progress=100, error_message="")
     except PauseRequested:
         update_job(job_id, status="paused", stage="paused", error_message="")
         if job["job_type"] == "render_clip" and job.get("clip_id"):
             set_clip_render_status(job["clip_id"], "paused")
         elif job["job_type"] == "generate_metadata" and job.get("clip_id"):
             set_clip_metadata_status(job["clip_id"], "paused")
+        elif job["job_type"] == "youtube_upload" and job.get("clip_id"):
+            event_id = json.loads(job.get("payload_json") or "{}").get("event_id")
+            if event_id:
+                set_youtube_publication_status(event_id, "paused")
         elif job["job_type"] == "analyze_recording":
             update_recording_status(recording_id, "ready")
         else:
@@ -178,6 +230,10 @@ def _process_job(job: dict[str, Any]) -> None:
             set_clip_render_status(job["clip_id"], "failed")
         elif job["job_type"] == "generate_metadata" and job.get("clip_id"):
             set_clip_metadata_status(job["clip_id"], "failed", error_message=str(error)[:1000])
+        elif job["job_type"] == "youtube_upload" and job.get("clip_id"):
+            event_id = json.loads(job.get("payload_json") or "{}").get("event_id")
+            if event_id:
+                set_youtube_publication_status(event_id, "failed", error_message=str(error)[:1000])
         else:
             current_analysis = get_recording_analysis(recording_id) if job["job_type"] == "analyze_recording" else None
             update_recording_status(recording_id, "analyzed" if current_analysis and current_analysis["transcript"] else "failed")
@@ -199,14 +255,14 @@ async def run_worker() -> None:
         if not settings["emergency_stop"] and not settings["processing_paused"]:
             await asyncio.to_thread(resume_paused_jobs)
             limit = max(1, min(int(settings["max_concurrent_jobs"]), 4))
-            heavy_job_active = any(job_type in {"analyze_recording", "render_clip", "generate_metadata"} for job_type in active.values())
+            heavy_job_active = any(job_type in {"analyze_recording", "render_clip", "generate_metadata", "youtube_upload"} for job_type in active.values())
             while len(active) < limit and not heavy_job_active:
                 job = await asyncio.to_thread(claim_next_job)
                 if job is None:
                     break
                 task = asyncio.create_task(asyncio.to_thread(_process_job, job))
                 active[task] = job["job_type"]
-                if job["job_type"] in {"analyze_recording", "render_clip", "generate_metadata"}:
+                if job["job_type"] in {"analyze_recording", "render_clip", "generate_metadata", "youtube_upload"}:
                     break
         await asyncio.sleep(0.5)
 

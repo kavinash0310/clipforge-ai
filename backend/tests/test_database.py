@@ -9,12 +9,14 @@ from clipforge.database import (
     DEFAULT_SETTINGS,
     create_analysis_job,
     create_render_job,
+    create_youtube_upload_job,
     create_recording,
     complete_clip_metadata,
     get_clip_render_input,
     database_session,
     get_recording_analysis,
     get_clip_metadata,
+    list_youtube_publications,
     initialize_database,
     read_overview,
     read_settings,
@@ -24,6 +26,8 @@ from clipforge.database import (
     save_clip_subtitles,
     save_clip_metadata,
     set_clip_render_status,
+    complete_youtube_publication,
+    save_youtube_analytics,
     write_settings,
 )
 
@@ -68,9 +72,15 @@ class DatabaseTests(unittest.TestCase):
                     id TEXT PRIMARY KEY, clip_id TEXT NOT NULL REFERENCES clips(id) ON DELETE CASCADE,
                     status TEXT NOT NULL, reviewer_note TEXT, reviewed_at TEXT, created_at TEXT NOT NULL
                 );
+                CREATE TABLE publish_events (
+                    id TEXT PRIMARY KEY, clip_id TEXT NOT NULL REFERENCES clips(id) ON DELETE CASCADE,
+                    platform TEXT NOT NULL, remote_id TEXT, privacy_status TEXT NOT NULL DEFAULT 'private',
+                    status TEXT NOT NULL DEFAULT 'queued', error_message TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                );
                 INSERT INTO recordings VALUES ('legacy-recording', 'C:/clips/legacy.mp4', 'legacy.mp4', 10, 'analyzed', 1, '2026-11-20');
                 INSERT INTO jobs VALUES ('legacy-job', 'legacy-recording', 'analyze_recording', 'complete', 100, 'complete', NULL, 1, '2026-11-20', '2026-11-20');
                 INSERT INTO clips VALUES ('legacy-clip', 'legacy-recording', NULL, 'Legacy moment', 75, 'candidate', '2026-11-20');
+                INSERT INTO publish_events VALUES ('legacy-publication', 'legacy-clip', 'youtube', 'old-video-id', 'private', 'complete', NULL, '2026-11-20', '2026-11-20');
                 """
             )
         connection.close()
@@ -80,12 +90,16 @@ class DatabaseTests(unittest.TestCase):
         with database_session(legacy_path) as connection:
             job_columns = {row["name"] for row in connection.execute("PRAGMA table_info(jobs)")}
             clip_columns = {row["name"] for row in connection.execute("PRAGMA table_info(clips)")}
+            publication_columns = {row["name"] for row in connection.execute("PRAGMA table_info(publish_events)")}
             approvals = connection.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'approvals'").fetchone()
             self.assertEqual(connection.execute("SELECT display_name FROM recordings WHERE id = 'legacy-recording'").fetchone()[0], "legacy.mp4")
             self.assertEqual(connection.execute("SELECT title FROM clips WHERE id = 'legacy-clip'").fetchone()[0], "Legacy moment")
+            self.assertEqual(connection.execute("SELECT remote_id FROM publish_events WHERE id = 'legacy-publication'").fetchone()[0], "old-video-id")
         self.assertIn("clip_id", job_columns)
         self.assertIn("subtitle_segments_json", clip_columns)
         self.assertIn("render_metadata_json", clip_columns)
+        self.assertIn("job_id", publication_columns)
+        self.assertIn("analytics_json", publication_columns)
         self.assertIsNone(approvals)
 
     def test_settings_are_persisted(self) -> None:
@@ -221,6 +235,39 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(overview["clips_total"], 1)
         self.assertEqual(overview["jobs_active"], 1)
         self.assertEqual(overview["recent_jobs"][0]["recording_name"], "session.mp4")
+
+    def test_youtube_publication_is_private_idempotent_and_tracks_analytics(self) -> None:
+        create_recording("recording-upload", "C:/clips/upload-source.mp4", "upload-source.mp4", True, self.database_path)
+        output_path = Path(self.temp_dir.name) / "rendered.mp4"
+        output_path.write_bytes(b"fake mp4 bytes")
+        with database_session(self.database_path) as connection:
+            connection.execute(
+                "INSERT INTO clips(id, recording_id, file_path, title, score, status, created_at) VALUES (?, ?, ?, ?, ?, 'rendered', ?)",
+                ("clip-upload", "recording-upload", str(output_path), "Final round", 80, "2026-11-20T00:00:00+00:00"),
+            )
+
+        queued = create_youtube_upload_job("clip-upload", self.database_path)
+        repeated = create_youtube_upload_job("clip-upload", self.database_path)
+        self.assertFalse(queued["existing"])
+        self.assertTrue(repeated["existing"])
+        self.assertEqual(repeated["id"], queued["id"])
+        self.assertEqual(list_youtube_publications(self.database_path)[0]["privacy_status"], "private")
+
+        complete_youtube_publication(queued["event_id"], "youtube-video-id", self.database_path)
+        self.assertEqual(create_youtube_upload_job("clip-upload", self.database_path)["status"], "complete")
+        publications = save_youtube_analytics({"youtube-video-id": {"views": 18, "likes": 4, "comments": 1, "shares": 2}}, self.database_path)
+        self.assertEqual(publications[0]["analytics"]["views"], 18)
+        self.assertEqual(publications[0]["video_url"], "https://www.youtube.com/watch?v=youtube-video-id")
+
+    def test_youtube_upload_requires_authorized_rendered_source(self) -> None:
+        create_recording("recording-upload-unauthorized", "C:/clips/unapproved.mp4", "unapproved.mp4", False, self.database_path)
+        with database_session(self.database_path) as connection:
+            connection.execute(
+                "INSERT INTO clips(id, recording_id, title, score, status, created_at) VALUES (?, ?, ?, ?, 'rendered', ?)",
+                ("clip-upload-unauthorized", "recording-upload-unauthorized", "Moment", 55, "2026-11-20T00:00:00+00:00"),
+            )
+        with self.assertRaises(PermissionError):
+            create_youtube_upload_job("clip-upload-unauthorized", self.database_path)
 
 
 if __name__ == "__main__":

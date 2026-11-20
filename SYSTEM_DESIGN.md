@@ -75,7 +75,20 @@ The UI is a Vite-built React application. During development, Vite proxies `/api
 
 Generated metadata is a draft. It does not verify ownership or licensing and cannot guarantee that a platform will avoid claims or strikes.
 
+## Phase 6: YouTube upload and channel analytics
+
+### OAuth connection and private uploads
+
+- **What / why:** Connects a creator's YouTube channel, uploads rendered clips, tracks publication state, resumes interrupted transfers, and reports channel performance without storing account tokens in SQLite.
+- **How:** The UI asks the API to start a Google Desktop OAuth flow. The API creates a random loopback listener, PKCE S256 verifier/challenge, and CSRF state, opens authorization in the system browser, and accepts the callback on `127.0.0.1`. Refresh tokens and resumable session URLs are DPAPI-protected for the current Windows user. Upload jobs are persisted; a resumable session is encrypted before transfer starts; a retry queries the remote byte range and continues from that offset. The insert body explicitly sets `privacyStatus=private`. A serialized database transaction creates one publication event per clip, preventing duplicate upload jobs.
+- **Technology:** Google OAuth 2.0 desktop flow, PKCE, Windows DPAPI via `ctypes`, FastAPI, SQLite, YouTube Data API resumable upload, and YouTube Analytics reports API.
+- **Alternatives:** Google API client libraries, browser-only uploads, or hosted backend token storage. This local Windows app keeps credentials and video bytes on the creator's PC and implements the small resumable request protocol directly so its session URL can be persisted securely.
+- **Verification:** Unit checks cover PKCE/state callback, refresh tokens, DPAPI encryption roundtrip, forced private status, resumable range recovery, per-video analytics, source authorization, and per-clip idempotency. Live API calls require a creator-provided Google Desktop OAuth client and are kept out of automated checks.
+- **Interview explanation:** “The upload path is resumable and private by construction. A single durable publication record owns the retry lifecycle, while the remote session URL is protected by the current user's Windows account.”
+
+The Google OAuth Desktop client is a public client; its client JSON is user-provided local configuration and cannot be treated as a confidential secret. User consent is part of Google's account authorization flow. OAuth apps left in external Testing mode may receive refresh tokens that expire after seven days; see [Google's OAuth overview](https://developers.google.com/identity/protocols/oauth2).
+
 ## Pipeline and later milestones
 
-Analysis, rendering, and metadata generation run as persisted jobs, not requests that hold an HTTP connection open. Each stage writes status and progress; retries are bounded and errors remain visible. Audio and scene features supply candidate events; transcript edits and metadata drafts are stored with each candidate. Public publishing remains disabled until a later upload integration is configured.
+Analysis, rendering, metadata generation, and YouTube transfers run as persisted jobs, not requests that hold an HTTP connection open. Each stage writes status and progress; retries are bounded and errors remain visible. Audio and scene features supply candidate events; transcript edits, metadata drafts, and publication events are stored with each candidate. YouTube upload privacy is explicitly private, and OAuth tokens plus upload-session URLs stay in the protected local credential blob.
 

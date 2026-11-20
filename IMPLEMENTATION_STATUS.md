@@ -17,7 +17,6 @@
 
 ## Upcoming milestones
 
-- YouTube OAuth, private upload, retry, duplicate prevention, and analytics
 - Scheduling, resource controls, recovery, and end-to-end documentation
 
 ## Scope decisions
@@ -25,7 +24,7 @@
 - Semi-automatic operation is the default.
 - Source video files must remain untouched.
 - Processing requires explicit source authorization confirmation at import.
-- Public publishing remains disabled until upload integration is configured.
+- YouTube upload integration is active and private-only; public visibility is not exposed.
 
 ## Phase 1 verification
 
@@ -98,9 +97,30 @@
 - Synthetic API/worker integration: local-model-unavailable path completed with offline template metadata; manual metadata edit persisted; the overview no longer exposes the inactive queue metric.
 - Fresh and existing empty-database migration checks confirm that the obsolete empty placeholder table is removed.
 
+## Phase 6 — YouTube connection and private uploads
+
+**Status:** Complete.
+
+- [x] Desktop Google OAuth with random loopback callback, PKCE S256, offline refresh, and state validation
+- [x] Current-user Windows DPAPI storage for refresh tokens and resumable upload session URLs
+- [x] Rendered, authorized clip upload with metadata and an explicit private privacy setting
+- [x] Chunked resumable transfer, server-range recovery, pause/restart recovery, and bounded retry
+- [x] Idempotent per-clip publication records and duplicate-click prevention
+- [x] Google account disconnect/revoke and local credential removal
+- [x] Per-video 28-day views, likes, comments, and shares via YouTube Analytics
+- [x] YouTube dashboard with connection, upload progress/retry, publication links, and cached analytics
+
+## Phase 6 verification
+
+- `python -m unittest discover -s backend/tests -v`: 21 tests passed, including the Windows DPAPI roundtrip.
+- `npm --prefix frontend run build`: TypeScript check and Vite production build passed.
+- `python -m compileall -q backend/clipforge backend/tests`: passed.
+- Mocked OAuth callback verified PKCE scopes, state exchange, token save, and refresh-token use; mocked upload verified forced private visibility, chunk range resume, and returned video ID/link.
+- Database checks verified private status, retryable publication history, analytics persistence, duplicate blocking, and the source-authorization guard.
+- Live Google upload was not run because a user-owned Desktop OAuth client file and channel consent are required.
+
 ## Next
 
-- Phase 6: YouTube OAuth and private uploads.
-- Phase 7: scheduling and analytics.
+- Phase 7: scheduling and resource controls.
 - Phase 8: integration optimization and documentation completion.
 

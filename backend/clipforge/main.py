@@ -19,14 +19,17 @@ from .clip_rendering import subtitle_files
 from .database import (
     create_analysis_job,
     create_render_job,
+    create_youtube_upload_job,
     create_recording,
     get_clip_metadata,
     get_clip_render_input,
+    get_clip_youtube_upload_input,
     get_recording_analysis,
     get_job,
     initialize_database,
     list_clips,
     list_jobs,
+    list_youtube_publications,
     list_recordings,
     read_overview,
     read_settings,
@@ -34,11 +37,15 @@ from .database import (
     queue_metadata_generation,
     save_clip_subtitles,
     save_clip_metadata,
+    utc_now,
+    save_youtube_analytics,
     write_settings,
 )
 from .media import choose_video_file, validate_video_path
 from .system_info import collect_system_info
 from .worker import run_worker
+from .youtube_api import YouTubeAPIError, channel_analytics
+from .youtube_auth import CLIENT_SECRETS_PATH, youtube_oauth
 
 
 class SettingsPatch(BaseModel):
@@ -293,6 +300,67 @@ def edit_clip_metadata(clip_id: str, payload: MetadataEditRequest) -> dict[str, 
     if result is None:
         raise HTTPException(status_code=404, detail="Clip candidate not found.")
     return result
+
+
+@app.get("/api/youtube/status")
+def youtube_status() -> dict[str, Any]:
+    return youtube_oauth.status()
+
+
+@app.post("/api/youtube/connect")
+def youtube_connect() -> dict[str, str]:
+    try:
+        return youtube_oauth.start()
+    except RuntimeError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@app.delete("/api/youtube/connect")
+def youtube_disconnect() -> dict[str, Any]:
+    try:
+        youtube_oauth.disconnect()
+    except RuntimeError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return {"configured": CLIENT_SECRETS_PATH.is_file(), "connected": False, "status": "not_connected", "error": None, "client_secrets_path": str(CLIENT_SECRETS_PATH)}
+
+
+@app.get("/api/youtube/publications")
+def youtube_publications() -> list[dict[str, Any]]:
+    return list_youtube_publications()
+
+
+@app.post("/api/clips/{clip_id}/youtube-upload", status_code=202)
+def queue_youtube_upload(clip_id: str) -> dict[str, Any]:
+    try:
+        youtube_oauth.access_token()
+        clip = get_clip_youtube_upload_input(clip_id)
+        if clip is None:
+            raise LookupError("Clip candidate not found.")
+        output_path = Path(clip["rendered_path"]).resolve() if clip.get("rendered_path") else None
+        if output_path is None or not output_path.is_relative_to(OUTPUT_DIR.resolve()) or not output_path.is_file():
+            raise RuntimeError("A completed local render is required before uploading.")
+        result = create_youtube_upload_job(clip_id)
+        if result["status"] == "failed":
+            raise HTTPException(status_code=409, detail="This clip already has a failed YouTube publication. Retry its existing job to avoid a duplicate upload.")
+        return result
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.post("/api/youtube/analytics/refresh")
+def refresh_youtube_analytics() -> dict[str, Any]:
+    try:
+        youtube_oauth.access_token()
+        publications = list_youtube_publications()
+        video_ids = [item["remote_id"] for item in publications if item["status"] == "complete" and item["remote_id"]]
+        metrics = channel_analytics(video_ids)
+        return {"publications": save_youtube_analytics(metrics), "refreshed_at": utc_now()}
+    except (RuntimeError, YouTubeAPIError) as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
 
 
 def _clip_video_response(clip_id: str, *, download: bool) -> FileResponse:

@@ -9,12 +9,12 @@ SQLite is created at `%LOCALAPPDATA%\ClipForgeAI\clipforge.db` on Windows. `CLIP
 - `recording_metadata`: ffprobe-derived media streams and probe timestamp.
 - `recording_transcripts`: transcript language/model, output paths, timestamped segments, and generation time.
 - `recording_analyses`: scene cuts, audio profile summary, scoring method/weights, and candidate count.
-- `jobs`: inspection, analysis, render, or metadata-generation type; recording and optional clip relationships; JSON payload; queued/running/paused/failed status; progress, stage, attempt count, and error text.
+- `jobs`: inspection, analysis, render, metadata-generation, or YouTube-upload type; recording and optional clip relationships; JSON payload; queued/running/paused/failed status; progress, stage, attempt count, and error text.
 - `clips`: candidate start/end, title, score, reason labels, signal breakdown, clip-relative editable subtitle segments, generated path, render metadata, and candidate/render status.
 - `clip_metadata`: game and tone context, editable title and description, tags and hashtags, generator, status, and update time.
-- `publish_events`: platform upload identity, privacy setting, status, and errors.
+- `publish_events`: one YouTube publication record per clip, linked job, remote video ID, explicit privacy status, progress, status/error, cached per-video analytics, and update times. OAuth tokens and resumable session URLs are excluded from SQLite and stored in the protected local credential blob.
 
-Recording, metadata, transcript, analysis, candidate, and clip-metadata tables are populated by the current workflow. Publication events remain available for later upload integration. Dashboard aggregates return zeros from an empty database, not fixture values.
+Recording, metadata, transcript, analysis, candidate, clip-metadata, job, and publication tables are populated by the current workflow. Dashboard aggregates return zeros from an empty database, not fixture values.
 
 ## Relationships and indexes
 

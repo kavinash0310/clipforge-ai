@@ -33,7 +33,15 @@ Rendering uses FFmpeg's `libx264` encoder and subtitles/libass filter. If a rend
 - Pause processing to stop new work from starting.
 - Emergency stop is a separate persisted control that future workers must check before processing or publishing.
 
-Publishing and analytics are not available yet.
+## Connect YouTube and upload privately
+
+1. In Google Cloud Console, create a project, enable **YouTube Data API v3** and **YouTube Analytics API**, then create an OAuth client with application type **Desktop app**. Google desktop apps use the system browser and PKCE for the loopback flow; see [Google's Desktop OAuth guide](https://developers.google.com/identity/protocols/oauth2/native-app).
+2. Download the client JSON and place it at `%LOCALAPPDATA%\ClipForgeAI\client_secrets.json`. Keep this file private and out of source control. If the OAuth consent screen is in Testing mode, add your Google account as a test user.
+3. Open ClipForge's **YouTube** page and choose **Connect YouTube**. Complete Google's account consent in the browser. Refresh tokens and resumable upload session URLs are stored in a DPAPI-protected file under app data.
+4. Render a clip, then choose **Upload privately**. ClipForge explicitly sets YouTube privacy to `private`; repeating the action reuses the existing publication record instead of starting another upload. Failed transfers can resume from the saved upload session using **Retry upload**.
+5. Select **Refresh analytics** to load the latest available 28-day views, likes, comments, and shares for uploaded clips.
+
+Only rendered clips with a source authorization confirmation can be uploaded. Google account consent is required for OAuth access. Upload sessions eventually expire; if the saved session expires, ClipForge stops and asks you to check the channel before starting another publication. Google's `videos.insert` method treats privacy as public if omitted, so ClipForge always sends the explicit private setting ([API reference](https://developers.google.com/youtube/data/reference/rest/v3/videos/insert)). Analytics use the [YouTube Analytics reports API](https://developers.google.com/youtube/analytics/reference/reports/query).
 
 ## Generate clip metadata
 

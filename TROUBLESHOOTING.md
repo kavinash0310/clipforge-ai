@@ -20,6 +20,22 @@ Start the Ollama app/service and verify its local API on `127.0.0.1:11434`. The 
 
 Confirm the local Ollama endpoint and configured model in Settings. If Ollama is reachable but returns invalid JSON, ClipForge also uses the template fallback. Retry generation after fixing the model, or edit and save the template draft directly. Generated metadata is a draft and cannot guarantee a platform's copyright or enforcement outcome.
 
+## YouTube connection is not configured
+
+In Google Cloud Console, enable **YouTube Data API v3** and **YouTube Analytics API**, create a **Desktop app** OAuth client, and place its downloaded JSON at the path shown on ClipForge's YouTube page. Add the account to OAuth test users if the consent screen is in Testing mode, then restart the API and connect again. Do not place OAuth JSON or token files in the repository.
+
+## YouTube sign-in or refresh fails
+
+Use a Desktop app client, not a Web app client, and allow the system browser to return to the local loopback listener. If Google's consent screen is in external Testing mode, refresh tokens expire after seven days; reconnect the account or move the OAuth project to the appropriate production state. For `redirect_uri_mismatch`, create a new Desktop client and use the downloaded client JSON. If the token blob cannot be unlocked after a Windows account change or reinstall, reconnect to create a new DPAPI-protected token.
+
+## YouTube upload is failed or paused
+
+Paused jobs resume when processing is unpaused. For a failed transfer, use **Retry upload** on the existing publication to query YouTube's acknowledged byte range and resume its encrypted session. If the session has expired, ClipForge stops rather than creating a potentially duplicate video; check the channel before attempting another upload. An API quota or invalid metadata error remains visible on the publication row.
+
+## YouTube analytics show no rows
+
+Refresh the report later; recent activity may not yet be available in YouTube Analytics. Confirm the YouTube Analytics API is enabled and reconnect if the analytics scope was not granted. Private videos may have no report metrics until they receive eligible views.
+
 ## Transcription fails while decoding audio
 
 Reinstall project dependencies with `python -m pip install -r requirements.txt`. faster-whisper 1.2.1 is incompatible with PyAV 19's changed `av.open` signature, so this project constrains PyAV below 19.

@@ -4,15 +4,18 @@ import {
   AlertTriangle,
   ArrowDownRight,
   ArrowUpRight,
+  BarChart3,
   Check,
   ChevronDown,
   CircleHelp,
   Clapperboard,
   Cpu,
+  ExternalLink,
   Film,
   Gauge,
   HardDrive,
   Layers3,
+  Link2,
   LoaderCircle,
   MonitorPlay,
   Pause,
@@ -23,11 +26,12 @@ import {
   Sparkles,
   SquareStop,
   Upload,
+  Unlink,
   WandSparkles,
   Zap,
 } from "lucide-react";
 
-type Page = "overview" | "media" | "settings";
+type Page = "overview" | "media" | "youtube" | "settings";
 type Job = {
   id: string;
   job_type: string;
@@ -133,6 +137,34 @@ type Clip = {
   preview_url: string | null;
   render_metadata: { duration_seconds?: number; width?: number; height?: number; codec?: string };
   rendered_at: string | null;
+  upload_title: string;
+  upload_description: string;
+  upload_hashtags: string[];
+  upload_tags: string[];
+};
+type YouTubeConnection = {
+  configured: boolean;
+  connected: boolean;
+  status: string;
+  error: string | null;
+  client_secrets_path: string;
+};
+type YouTubePublication = {
+  id: string;
+  clip_id: string;
+  job_id: string | null;
+  remote_id: string | null;
+  privacy_status: string;
+  status: string;
+  progress: number;
+  analytics: { views?: number; likes?: number; comments?: number; shares?: number };
+  analytics_updated_at: string | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+  clip_title: string;
+  upload_title: string | null;
+  video_url: string | null;
 };
 type RecordingAnalysis = {
   recording_id: string;
@@ -170,6 +202,7 @@ type RecordingAnalysis = {
 const navItems = [
   { label: "Overview", icon: Layers3, page: "overview" as const },
   { label: "Media library", icon: MonitorPlay, page: "media" as const },
+  { label: "YouTube", icon: Upload, page: "youtube" as const },
   { label: "Settings", icon: Settings2, page: "settings" as const },
 ];
 
@@ -335,7 +368,7 @@ function App() {
         <div className="workflow-list">
           <div className="workflow-item"><span className="workflow-number">01</span><span>Bring in footage</span><span className="workflow-dot" /></div>
           <div className="workflow-item"><span className="workflow-number">02</span><span>Find highlights</span><span className="workflow-dot" /></div>
-          <div className="workflow-item"><span className="workflow-number">03</span><span>Review and publish</span><span className="workflow-dot" /></div>
+          <div className="workflow-item"><span className="workflow-number">03</span><span>Prepare and publish</span><span className="workflow-dot" /></div>
         </div>
 
         <div className="sidebar-spacer" />
@@ -353,7 +386,7 @@ function App() {
 
       <main className="main-area">
         <header className="topbar">
-              <div className="breadcrumb"><span>CLIPFORGE AI</span><span className="crumb-divider">/</span><span>{page === "overview" ? "OVERVIEW" : page === "media" ? "MEDIA LIBRARY" : "SETTINGS"}</span></div>
+              <div className="breadcrumb"><span>CLIPFORGE AI</span><span className="crumb-divider">/</span><span>{page === "overview" ? "OVERVIEW" : page === "media" ? "MEDIA LIBRARY" : page === "youtube" ? "YOUTUBE" : "SETTINGS"}</span></div>
           <div className="topbar-actions">
             <div className={`system-pill ${systemReady ? "ready" : "attention"}`}>
               <span className="pill-dot" />{systemReady ? "Studio ready" : "Setup needs attention"}
@@ -444,6 +477,8 @@ function App() {
             </>
           ) : page === "media" ? (
             <MediaPage onRefresh={() => void loadDashboard(true)} />
+          ) : page === "youtube" ? (
+            <YouTubePage onRefresh={() => void loadDashboard(true)} />
           ) : (
             <SettingsPage
               settings={settings}
@@ -890,6 +925,184 @@ function MediaPage({ onRefresh }: { onRefresh: () => void }) {
   );
 }
 
+function YouTubePage({ onRefresh }: { onRefresh: () => void }) {
+  const [connection, setConnection] = useState<YouTubeConnection | null>(null);
+  const [clips, setClips] = useState<Clip[]>([]);
+  const [publications, setPublications] = useState<YouTubePublication[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [working, setWorking] = useState<string | null>(null);
+  const [analyticsUpdatedAt, setAnalyticsUpdatedAt] = useState<string | null>(null);
+  const [pageError, setPageError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      const [status, nextClips, nextPublications] = await Promise.all([
+        api<YouTubeConnection>("/api/youtube/status"),
+        api<Clip[]>("/api/clips"),
+        api<YouTubePublication[]>("/api/youtube/publications"),
+      ]);
+      setConnection(status);
+      setClips(nextClips);
+      setPublications(nextPublications);
+      setPageError(status.error);
+      if (nextPublications.some((item) => item.analytics_updated_at)) {
+        setAnalyticsUpdatedAt(nextPublications.find((item) => item.analytics_updated_at)?.analytics_updated_at ?? null);
+      }
+    } catch (reason) {
+      setPageError(reason instanceof Error ? reason.message : "YouTube status could not be loaded.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 4000);
+    return () => window.clearInterval(timer);
+  }, [refresh]);
+
+  const connect = async () => {
+    const authWindow = window.open("about:blank", "_blank", "popup,width=560,height=760");
+    if (!authWindow) {
+      setPageError("Allow the YouTube sign-in window to open, then try again.");
+      return;
+    }
+    authWindow.opener = null;
+    setWorking("connect");
+    setPageError(null);
+    try {
+      const result = await api<{ authorization_url: string }>("/api/youtube/connect", { method: "POST" });
+      authWindow.location.replace(result.authorization_url);
+      setMessage("Complete Google account access in the browser window. ClipForge will update when it returns.");
+      await refresh();
+    } catch (reason) {
+      authWindow.close();
+      setPageError(reason instanceof Error ? reason.message : "YouTube could not be connected.");
+    } finally {
+      setWorking(null);
+    }
+  };
+
+  const disconnect = async () => {
+    setWorking("disconnect");
+    setPageError(null);
+    try {
+      const next = await api<YouTubeConnection>("/api/youtube/connect", { method: "DELETE" });
+      setConnection(next);
+      setMessage("YouTube account disconnected. Saved publication history remains on this device.");
+    } catch (reason) {
+      setPageError(reason instanceof Error ? reason.message : "The YouTube account could not be disconnected.");
+    } finally {
+      setWorking(null);
+    }
+  };
+
+  const upload = async (clip: Clip) => {
+    setWorking(clip.id);
+    setPageError(null);
+    setMessage(null);
+    try {
+      const result = await api<{ id: string | null; status: string; existing: boolean }>(`/api/clips/${encodeURIComponent(clip.id)}/youtube-upload`, { method: "POST" });
+      setMessage(result.existing ? "This clip already has a YouTube publication record." : "Private YouTube upload queued.");
+      await refresh();
+      onRefresh();
+    } catch (reason) {
+      setPageError(reason instanceof Error ? reason.message : "The YouTube upload could not be queued.");
+    } finally {
+      setWorking(null);
+    }
+  };
+
+  const retry = async (publication: YouTubePublication) => {
+    if (!publication.job_id) return;
+    setWorking(publication.id);
+    setPageError(null);
+    try {
+      await api(`/api/jobs/${encodeURIComponent(publication.job_id)}/retry`, { method: "POST" });
+      setMessage("The existing upload session was queued to resume. ClipForge will not create a second publication for this clip.");
+      await refresh();
+    } catch (reason) {
+      setPageError(reason instanceof Error ? reason.message : "The upload could not be retried.");
+    } finally {
+      setWorking(null);
+    }
+  };
+
+  const refreshAnalytics = async () => {
+    setWorking("analytics");
+    setPageError(null);
+    try {
+      const result = await api<{ publications: YouTubePublication[]; refreshed_at: string }>("/api/youtube/analytics/refresh", { method: "POST" });
+      setPublications(result.publications);
+      setAnalyticsUpdatedAt(result.refreshed_at);
+      setMessage("Channel analytics refreshed for the latest available 28-day period.");
+    } catch (reason) {
+      setPageError(reason instanceof Error ? reason.message : "YouTube analytics could not be refreshed.");
+    } finally {
+      setWorking(null);
+    }
+  };
+
+  const publicationByClip = new Map(publications.map((item) => [item.clip_id, item]));
+  const renderedClips = clips.filter((clip) => clip.status === "rendered" && clip.preview_url);
+  const isConnected = Boolean(connection?.connected);
+  const completed = publications.filter((item) => item.status === "complete");
+  const totals = completed.reduce((value, item) => ({
+    views: value.views + (item.analytics.views ?? 0),
+    likes: value.likes + (item.analytics.likes ?? 0),
+    comments: value.comments + (item.analytics.comments ?? 0),
+    shares: value.shares + (item.analytics.shares ?? 0),
+  }), { views: 0, likes: 0, comments: 0, shares: 0 });
+
+  return (
+    <>
+      <section className="page-heading youtube-heading">
+        <div><div className="eyebrow"><span className="eyebrow-line" /> CHANNEL CONNECTION</div><h1>YouTube<span className="heading-period">.</span></h1><p className="heading-subtitle">Upload finished clips privately and track channel results.</p></div>
+        <span className={`youtube-state ${isConnected ? "connected" : "disconnected"}`}><span />{loading ? "Checking" : isConnected ? "Connected" : "Not connected"}</span>
+      </section>
+
+      {pageError && <div className="youtube-feedback error"><AlertTriangle size={14} /><span>{pageError}</span></div>}
+      {message && <div className="youtube-feedback success"><Check size={14} /><span>{message}</span></div>}
+
+      <section className="surface-card youtube-connect-card">
+        <div className="youtube-connect-copy"><div className="youtube-connect-icon"><Upload size={18} /></div><div><div className="section-overline">PRIVATE UPLOADS</div><h3>{isConnected ? "Connected to YouTube" : "Connect your channel"}</h3><p>{isConnected ? "New uploads from ClipForge are always created with private visibility." : "Link your Google account using OAuth in your system browser. ClipForge stores refresh tokens protected with Windows DPAPI."}</p>{connection?.error && <small className="youtube-error-detail">{connection.error}</small>}</div></div>
+        <div className="youtube-connect-actions">
+          {isConnected ? <button className="secondary-button" disabled={working !== null} onClick={() => void disconnect()}>{working === "disconnect" ? <LoaderCircle size={13} className="spin" /> : <Unlink size={13} />}Disconnect</button> : <button className="primary-button" disabled={working !== null || !connection?.configured} onClick={() => void connect()}>{working === "connect" ? <LoaderCircle size={13} className="spin" /> : <Link2 size={13} />}Connect YouTube</button>}
+          {connection?.status === "pending" && <span className="youtube-pending"><LoaderCircle size={13} className="spin" />Waiting for Google…</span>}
+        </div>
+        {!connection?.configured && <div className="youtube-setup-note"><CircleHelp size={14} /><span>Add a Google Desktop OAuth client JSON file here: <code>{connection?.client_secrets_path ?? "%LOCALAPPDATA%\\ClipForgeAI\\client_secrets.json"}</code>. Enable YouTube Data API v3 and YouTube Analytics API in that Google Cloud project.</span><a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer">Google Cloud credentials <ExternalLink size={12} /></a></div>}
+        {connection?.configured && !isConnected && <div className="youtube-setup-note"><ShieldCheck size={14} /><span>Google consent is required for channel upload and analytics access. ClipForge requests only YouTube upload, read, and analytics scopes.</span><a href="https://developers.google.com/identity/protocols/oauth2/native-app" target="_blank" rel="noreferrer">Desktop OAuth guide <ExternalLink size={12} /></a></div>}
+      </section>
+
+      <section className="surface-card youtube-clips-card">
+        <div className="section-header"><div><div className="section-overline">READY TO UPLOAD</div><h3>Rendered clips</h3></div><span className="youtube-subtle-count">{renderedClips.length} ready</span></div>
+        {loading ? <div className="loading-state"><LoaderCircle className="spin" size={18} /> Loading rendered clips…</div> : renderedClips.length ? <div className="youtube-clips-list">{renderedClips.map((clip) => {
+          const publication = publicationByClip.get(clip.id);
+          const busy = publication && ["queued", "uploading", "paused"].includes(publication.status);
+          return <article className="youtube-clip-row" key={clip.id}>
+            <div className="youtube-clip-mark"><Film size={17} /></div>
+            <div className="youtube-clip-copy"><strong>{clip.upload_title || clip.title}</strong><span>{clip.recording_name} · {formatDuration(clip.render_metadata.duration_seconds)} · Private visibility</span>{publication?.status === "uploading" && <div className="youtube-progress"><span style={{ width: `${Math.max(0, Math.min(publication.progress, 100))}%` }} /></div>}{publication?.status === "failed" && <small className="youtube-error-detail">{publication.error_message || "Upload failed."}</small>}</div>
+            <div className="youtube-clip-action">{publication?.status === "complete" ? <a className="secondary-button" href={publication.video_url ?? undefined} target="_blank" rel="noreferrer">Uploaded privately <ExternalLink size={12} /></a> : publication?.status === "failed" ? <button className="secondary-button" disabled={working !== null || !isConnected} onClick={() => void retry(publication)}>{working === publication.id ? <LoaderCircle size={13} className="spin" /> : <RefreshCw size={13} />}Retry upload</button> : publication ? <span className={`clip-state clip-state-${publication.status}`}>{busy ? <LoaderCircle size={12} className="spin" /> : null}{publication.status.replaceAll("_", " ")}{publication.status === "uploading" ? ` ${Math.round(publication.progress)}%` : ""}</span> : <button className="primary-button" disabled={!isConnected || working !== null} onClick={() => void upload(clip)}>{working === clip.id ? <LoaderCircle size={13} className="spin" /> : <Upload size={13} />}Upload privately</button>}</div>
+          </article>;
+        })}</div> : <div className="youtube-empty"><div className="empty-icon"><Film size={18} /></div><div><strong>No rendered clips yet</strong><p>Render a candidate in Media library to make it available for a private upload.</p></div></div>}
+      </section>
+
+      <section className="surface-card youtube-analytics-card">
+        <div className="section-header"><div><div className="section-overline">CHANNEL ANALYTICS</div><h3>Recent performance</h3></div><button className="text-button" disabled={!isConnected || working !== null || completed.length === 0} onClick={() => void refreshAnalytics()}>{working === "analytics" ? <LoaderCircle size={13} className="spin" /> : <RefreshCw size={13} />}Refresh analytics</button></div>
+        <p className="youtube-analytics-caption">Latest available 28-day channel report; analytics can lag behind recent views.</p>
+        {completed.length > 0 && <div className="youtube-metric-grid"><Metric value={totals.views} label="Views" /><Metric value={totals.likes} label="Likes" /><Metric value={totals.comments} label="Comments" /><Metric value={totals.shares} label="Shares" /></div>}
+        {completed.length > 0 ? <div className="youtube-publication-list">{completed.map((publication) => <article className="youtube-publication-row" key={publication.id}><div className="youtube-publication-icon"><BarChart3 size={15} /></div><div className="youtube-publication-copy"><strong>{publication.upload_title || publication.clip_title}</strong><span>Published privately · {publication.remote_id}</span></div><div className="youtube-publication-metrics"><span>{(publication.analytics.views ?? 0).toLocaleString()} views</span><span>{(publication.analytics.likes ?? 0).toLocaleString()} likes</span><span>{(publication.analytics.comments ?? 0).toLocaleString()} comments</span></div><span className="youtube-updated">{publication.analytics_updated_at ? `Updated ${formatDate(publication.analytics_updated_at)}` : "Not refreshed"}</span></article>)}</div> : <div className="youtube-empty"><div className="empty-icon"><BarChart3 size={18} /></div><div><strong>No YouTube analytics yet</strong><p>Private uploads will appear here after the channel has report data.</p></div></div>}
+        {analyticsUpdatedAt && <div className="youtube-analytics-foot">Last refreshed {formatDate(analyticsUpdatedAt)} · {completed.length} private uploads</div>}
+      </section>
+    </>
+  );
+}
+
+function Metric({ value, label }: { value: number; label: string }) {
+  return <div className="youtube-metric"><strong>{value.toLocaleString()}</strong><span>{label}</span></div>;
+}
+
 function SettingsPage({ settings, system, saved, saveSettings, loading }: {
   settings: Settings | null;
   system: SystemInfo | null;
@@ -923,7 +1136,7 @@ function SettingsPage({ settings, system, saved, saveSettings, loading }: {
                 </button>
               ))}
             </div>
-            <div className="settings-note"><ShieldCheck size={15} /><span>Publishing integration is not active. Public uploads are disabled by default.</span></div>
+            <div className="settings-note"><ShieldCheck size={15} /><span>YouTube uploads are always private in this release.</span></div>
           </section>
 
           <section className="surface-card settings-card">

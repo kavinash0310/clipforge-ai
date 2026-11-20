@@ -16,4 +16,5 @@ output/
 *.db-wal
 client_secrets.json
 token.json
+youtube_credentials.dpapi
 

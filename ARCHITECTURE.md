@@ -6,7 +6,7 @@
 - Use one Python service and one local UI, with SQLite for durable state.
 - Keep processing modules replaceable and run long work as resumable jobs.
 - Never overwrite source recordings; write generated media separately.
-- Keep public publishing disabled until an explicit upload integration is configured.
+- Upload to YouTube as private only; the current UI does not expose public visibility.
 
 ## Local application structure
 
@@ -38,7 +38,8 @@ flowchart LR
     Review --> Render[FFmpeg clip and vertical render]
     Render --> Preview[Preview and caption correction]
     Preview --> Metadata[Local title, description, and tag generation]
-    Metadata --> YouTube[Later YouTube integration]
+    Metadata --> YouTube[OAuth · resumable private upload]
+    YouTube --> Analytics[YouTube channel analytics]
 ```
 
 ## Technology choices
@@ -54,7 +55,7 @@ flowchart LR
 
 ## Operating boundaries
 
-The service binds to loopback. The browser UI uses same-origin API paths in a production build and a narrow localhost proxy in development. SQLite contains application state, not video bytes. The output directory is separate from source directories. Render jobs reference a selected candidate and its clip-relative caption edits; FFmpeg writes a new MP4 and SRT under app data. YouTube access is an opt-in OAuth integration and is not part of the current phase.
+The service binds to loopback. The browser UI uses same-origin API paths in a production build and a narrow localhost proxy in development. SQLite contains application state, not video bytes. The output directory is separate from source directories. Render jobs reference a selected candidate and its clip-relative caption edits; FFmpeg writes a new MP4 and SRT under app data. YouTube is an opt-in desktop OAuth integration; uploads are explicitly private and resumable, and analytics are read from the connected channel.
 
 Transcription uses CPU `int8` to keep the machine's 4 GB GPU available to the desktop and other local tools. The first analysis downloads the selected faster-whisper model into app data. Candidate scoring is deterministic and combines audio energy, speech context, excitement phrases, and scene-change counts; its score is a ranking aid for human review.
 

@@ -13,7 +13,7 @@
 - Faster-whisper inference, quantization, CPU/GPU selection, and caption correction.
 - Event scoring, context windows, and quality evaluation.
 - Resumable job design, retries, idempotency, and resource limits.
-- OAuth consent, resumable YouTube upload, quota-aware analytics, and privacy defaults.
+- Resource controls, worker recovery, and publishing safeguards.
 
 ## Phase 3 engineering notes
 
@@ -62,4 +62,18 @@
 - **Interview explanation:** “Generation is an optional local aid: the persistent job and fallback make the feature useful even when the language model is missing.”
 
 Generated copy should be fact-checked. It does not assess copyright status or assure platform outcomes.
+
+## Phase 6 engineering notes
+
+### YouTube OAuth, upload, and analytics
+
+- **What:** Connects a YouTube channel, uploads a rendered clip privately, resumes interrupted uploads, prevents duplicate publication records, and reads channel metrics.
+- **Why:** A local editing workflow needs a reliable handoff to the creator's channel, while default private visibility and explicit account consent keep publishing under the user's control.
+- **How:** A desktop OAuth flow uses PKCE S256 and a random loopback port. The worker starts YouTube's resumable upload protocol, stores the session URI inside the encrypted credential blob, checks the server's acknowledged byte range after interruption, and resumes with the same publication event. A channel analytics report returns per-video views, likes, comments, and shares for the latest available 28-day interval.
+- **Technology choice:** Standard-library HTTPS requests, Google OAuth Desktop, Windows DPAPI, SQLite jobs/publication events, YouTube Data API v3, and YouTube Analytics API.
+- **Alternatives:** Google API client libraries, a browser-side upload, or hosted token storage. Local transfer and token storage avoid placing recordings or refresh tokens on a ClipForge server.
+- **How to verify:** Run OAuth, DPAPI, upload-resume, analytics parsing, idempotency, and authorization checks; run a real upload only with a creator-owned client JSON and account consent.
+- **Interview explanation:** “Persisting the resumable session separately from the event row lets a worker restart without creating a second video, and explicit private status avoids relying on a platform default.”
+
+Google Desktop OAuth is a public-client flow and requires Google account consent. A Google OAuth project in external Testing status can issue refresh tokens that expire after seven days. See [Google's Desktop OAuth documentation](https://developers.google.com/identity/protocols/oauth2/native-app) and [OAuth refresh-token behavior](https://developers.google.com/identity/protocols/oauth2).
 
