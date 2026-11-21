@@ -30,7 +30,6 @@ import {
   SquareStop,
   Upload,
   Unlink,
-  WandSparkles,
   Zap,
 } from "lucide-react";
 
@@ -209,9 +208,9 @@ type RecordingAnalysis = {
 };
 
 const navItems = [
-  { label: "Overview", icon: Layers3, page: "overview" as const },
-  { label: "Media library", icon: MonitorPlay, page: "media" as const },
+  { label: "Create clips", icon: Clapperboard, page: "media" as const },
   { label: "YouTube", icon: Upload, page: "youtube" as const },
+  { label: "Overview", icon: Layers3, page: "overview" as const },
   { label: "Settings", icon: Settings2, page: "settings" as const },
 ];
 
@@ -267,7 +266,7 @@ function greeting() {
 }
 
 function App() {
-  const [page, setPage] = useState<Page>("overview");
+  const [page, setPage] = useState<Page>("media");
   const [overview, setOverview] = useState<Overview | null>(null);
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -359,8 +358,8 @@ function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand-row">
-          <div className="brand-mark"><WandSparkles size={19} strokeWidth={2.2} /></div>
-          <div className="brand-copy"><span>CLIPFORGE</span><small>AI STUDIO</small></div>
+              <div className="brand-mark"><Clapperboard size={18} strokeWidth={2} /></div>
+          <div className="brand-copy"><span>CLIPFORGE</span><small>VIDEO STUDIO</small></div>
           <button className="icon-button sidebar-collapse" aria-label="Sidebar options"><ChevronDown size={15} /></button>
         </div>
 
@@ -375,16 +374,16 @@ function App() {
           {navItems.map(({ label, icon: Icon, page: target }) => (
             <button key={target} className={`nav-item ${page === target ? "active" : ""}`} onClick={() => setPage(target)}>
               <Icon size={17} strokeWidth={1.9} /><span>{label}</span>
-              {target === "overview" && activeJobs > 0 && <span className="nav-count">{activeJobs}</span>}
+              {target === "media" && activeJobs > 0 && <span className="nav-count">{activeJobs}</span>}
             </button>
           ))}
         </nav>
 
-        <div className="nav-label modules-label">WORKFLOW</div>
+        <div className="nav-label modules-label">THE PROCESS</div>
         <div className="workflow-list">
-          <div className="workflow-item"><span className="workflow-number">01</span><span>Bring in footage</span><span className="workflow-dot" /></div>
-          <div className="workflow-item"><span className="workflow-number">02</span><span>Find highlights</span><span className="workflow-dot" /></div>
-          <div className="workflow-item"><span className="workflow-number">03</span><span>Prepare and publish</span><span className="workflow-dot" /></div>
+          <div className="workflow-item"><span className="workflow-number">01</span><span>Add a recording</span><span className="workflow-dot" /></div>
+          <div className="workflow-item"><span className="workflow-number">02</span><span>Pick the moments</span><span className="workflow-dot" /></div>
+          <div className="workflow-item"><span className="workflow-number">03</span><span>Export or schedule</span><span className="workflow-dot" /></div>
         </div>
 
         <div className="sidebar-spacer" />
@@ -402,7 +401,7 @@ function App() {
 
       <main className="main-area">
         <header className="topbar">
-              <div className="breadcrumb"><span>CLIPFORGE AI</span><span className="crumb-divider">/</span><span>{page === "overview" ? "OVERVIEW" : page === "media" ? "MEDIA LIBRARY" : page === "youtube" ? "YOUTUBE" : "SETTINGS"}</span></div>
+              <div className="breadcrumb"><span>CLIPFORGE</span><span className="crumb-divider">/</span><span>{page === "overview" ? "OVERVIEW" : page === "media" ? "CREATE CLIPS" : page === "youtube" ? "YOUTUBE" : "SETTINGS"}</span></div>
           <div className="topbar-actions">
             <div className={`system-pill ${systemReady ? "ready" : "attention"}`}>
               <span className="pill-dot" />{systemReady ? "Studio ready" : "Setup needs attention"}
@@ -505,7 +504,7 @@ function App() {
             />
           )}
 
-          <footer className="app-footer"><span>CLIPFORGE AI <b>·</b> LOCAL CREATOR STUDIO</span><span>Built for your workflow <Sparkles size={12} /></span></footer>
+          <footer className="app-footer"><span>CLIPFORGE <b>·</b> LOCAL VIDEO STUDIO</span><span>Made for the moments worth sharing</span></footer>
         </div>
       </main>
     </div>
@@ -638,7 +637,7 @@ function MediaPage({ onRefresh }: { onRefresh: () => void }) {
         method: "POST",
         body: JSON.stringify({ path, authorized }),
       });
-      setMessage(`${result.display_name} added to the inspection queue.`);
+      setMessage(`${result.display_name} added. Choose Find clips when the file is ready.`);
       setPath("");
       setAuthorized(false);
       await refresh();
@@ -829,7 +828,7 @@ function MediaPage({ onRefresh }: { onRefresh: () => void }) {
   return (
     <>
       <section className="page-heading media-heading">
-        <div><div className="eyebrow"><span className="eyebrow-line" /> LOCAL SOURCE LIBRARY</div><h1>Media library<span className="heading-period">.</span></h1><p className="heading-subtitle">Add a local video to analyze moments and build captioned clips.</p></div>
+        <div><div className="eyebrow"><span className="eyebrow-line" /> YOUR NEXT EDIT STARTS HERE</div><h1>Make clips<span className="heading-period">.</span></h1><p className="heading-subtitle">Add a recording. ClipForge finds the standout moments, adds captions, and prepares vertical videos.</p></div>
         <button className="secondary-button" onClick={() => void refresh()}><RefreshCw size={14} /> Refresh library</button>
       </section>
 
@@ -839,24 +838,24 @@ function MediaPage({ onRefresh }: { onRefresh: () => void }) {
       <section className="surface-card import-card">
         <div className="import-card-header">
           <div className="import-icon"><Upload size={18} /></div>
-          <div><div className="section-overline">ADD LOCAL RECORDING</div><h3>Bring a session into your studio</h3><p>Choose a local file or paste its path. For your own YouTube uploads, <a href="https://studio.youtube.com" target="_blank" rel="noreferrer">download the MP4 in YouTube Studio</a>, then import it here. ClipForge does not download watch links.</p></div>
+          <div><div className="section-overline">01 &nbsp;·&nbsp; ADD A SOURCE</div><h3>Start with a video</h3><p>Choose a recording from your computer or paste its file path. To use your own YouTube upload, get the MP4 from <a href="https://studio.youtube.com" target="_blank" rel="noreferrer">YouTube Studio</a> first.</p></div>
         </div>
         <form onSubmit={(event) => void importRecording(event)}>
           <div className="path-entry-row">
             <label className="sr-only" htmlFor="recording-path">Video file path</label>
-            <input id="recording-path" type="text" autoComplete="off" spellCheck={false} value={path} onChange={(event) => setPath(event.target.value)} placeholder="Paste a local path or browse for a recording" />
+            <input id="recording-path" type="text" autoComplete="off" spellCheck={false} value={path} onChange={(event) => setPath(event.target.value)} placeholder="Video file path · for example D:\\Videos\\session.mp4" />
             <button type="button" className="secondary-button browse-button" onClick={() => void browse()} disabled={busy}><HardDrive size={14} /> Browse files</button>
           </div>
           <div className="import-actions-row">
             <label className="authorization-check"><input type="checkbox" checked={authorized} onChange={(event) => setAuthorized(event.target.checked)} /><span className="checkmark"><Check size={12} /></span><span>I own this recording or have permission to use it.</span></label>
-            <button className="primary-button import-submit" type="submit" disabled={!path.trim() || !authorized || busy}>{busy ? <LoaderCircle className="spin" size={15} /> : <Upload size={15} />}{busy ? "Working…" : "Add recording"}<ArrowUpRight size={14} /></button>
+            <button className="primary-button import-submit" type="submit" disabled={!path.trim() || !authorized || busy}>{busy ? <LoaderCircle className="spin" size={15} /> : <Upload size={15} />}{busy ? "Adding video…" : "Add video"}<ArrowUpRight size={14} /></button>
           </div>
         </form>
         <div className="import-footnote"><ShieldCheck size={14} /><span>Authorization is required before processing. This confirmation does not clear rights to third-party music or game assets.</span></div>
       </section>
 
       <section className="surface-card clip-plan-card">
-        <div className="clip-plan-copy"><div className="section-overline">AI CLIP SETTINGS</div><h3>Choose how many clips to create</h3><p>ClipForge ranks gameplay moments, prepares captions, renders vertical video, and drafts relevant upload metadata automatically.</p></div>
+        <div className="clip-plan-copy"><div className="section-overline">02 &nbsp;·&nbsp; SET THE CUT</div><h3>Choose your batch</h3><p>Pick how many highlights to find and a target length. Captions, vertical framing, and upload details are prepared automatically.</p></div>
         <div className="clip-plan-fields">
           <label>Number of clips<input type="number" min={1} max={100} value={clipCount} onChange={(event) => setClipCount(Math.max(1, Math.min(100, Number(event.target.value) || 1)))} /></label>
           <label>Clip duration<select value={clipDuration} onChange={(event) => setClipDuration(Number(event.target.value))}><option value={15}>15 seconds</option><option value={30}>30 seconds</option><option value={45}>45 seconds</option></select></label>
@@ -866,7 +865,7 @@ function MediaPage({ onRefresh }: { onRefresh: () => void }) {
       <div className="media-columns">
         <section className="surface-card library-card">
           <div className="section-header">
-            <div><div className="section-overline">SOURCE FILES</div><h3>Recordings <span className="count-badge">{recordings.length}</span></h3></div>
+            <div><div className="section-overline">YOUR FOOTAGE</div><h3>Recordings <span className="count-badge">{recordings.length}</span></h3></div>
             <span className="library-local-tag"><span /> Stored locally</span>
           </div>
           {recordings.length ? <div className="recording-list">
@@ -879,7 +878,7 @@ function MediaPage({ onRefresh }: { onRefresh: () => void }) {
                 {recording.transcript_model && <button className="row-action-button" onClick={() => void viewAnalysis(recording.id)}>View results</button>}
                 {jobs.some((job) => job.recording_id === recording.id && job.job_type === "analyze_recording" && ["queued", "running", "paused"].includes(job.status))
                   ? <span className="analysis-running"><LoaderCircle size={12} className="spin" /> Analysis queued</span>
-                  : <button className="row-action-button analyze-action" disabled={analyzingId === recording.id || !["ready", "analyzed"].includes(recording.status) && !(recording.status === "failed" && Boolean(recording.metadata))} onClick={() => void startAnalysis(recording)}>{analyzingId === recording.id ? <LoaderCircle size={12} className="spin" /> : <Sparkles size={12} />}{recording.transcript_model ? "Re-analyze" : "Analyze"}</button>}
+                  : <button className="row-action-button analyze-action" disabled={analyzingId === recording.id || !["ready", "analyzed"].includes(recording.status) && !(recording.status === "failed" && Boolean(recording.metadata))} onClick={() => void startAnalysis(recording)}>{analyzingId === recording.id ? <LoaderCircle size={12} className="spin" /> : <Sparkles size={12} />}{recording.transcript_model ? "Find new clips" : "Find clips"}</button>}
               </div>
             </div>)}
           </div> : <div className="library-empty"><div className="empty-icon"><MonitorPlay size={20} /></div><strong>No recordings added</strong><p>Choose an authorized video file to create your first local source entry.</p></div>}
