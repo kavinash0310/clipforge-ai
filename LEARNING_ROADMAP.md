@@ -89,3 +89,15 @@ Google Desktop OAuth is a public-client flow and requires Google account consent
 - **How to verify:** Unit-test local weekday/overnight windows, selected days, equal-time full-day windows, safe queue claiming, and thread budget limits; build the Settings page.
 - **Interview explanation:** “Scheduling is a persisted queue gate, so closed windows never discard work. CPU use is approximated through bounded parallelism and per-job thread counts, with the limit clearly distinguished from an OS-enforced quota.”
 
+## Phase 8 engineering notes
+
+### Cross-phase workflow validation
+
+- **What:** Drives one authorized synthetic recording through the API, background worker, SQLite state, render output, private publication record, and analytics update.
+- **Why:** Module tests cannot detect every error at a boundary between persisted job state and the next stage's inputs.
+- **How:** FastAPI's in-process test client starts the real lifespan and worker with isolated temporary storage. External processing/API methods are mocked to keep the test deterministic; a separate FFmpeg integration test creates synthetic media and exercises the real renderer.
+- **Technology choice:** `unittest`, FastAPI `TestClient`, HTTPX, SQLite temporary directories, mock patching, FFmpeg lavfi test sources, and ffprobe validation.
+- **Alternatives:** Live service tests, a containerized test stack, or a dedicated test database server. External credentials and long model downloads are intentionally excluded from routine test runs.
+- **How to verify:** Follow [INTEGRATION_TESTING.md](INTEGRATION_TESTING.md), then run the full suite, compile check, and Vite production build.
+- **Interview explanation:** “The integration test preserves real routing, job transitions, and persistence while mocking only unstable external boundaries; a separate media test keeps FFmpeg behavior real.”
+

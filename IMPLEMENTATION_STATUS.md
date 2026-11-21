@@ -15,9 +15,9 @@
 - [x] Verify desktop and narrow-screen layout
 - [x] Update status with results
 
-## Upcoming milestones
+## Roadmap status
 
-- Phase 8 integration optimization and documentation completion
+- No remaining phases in the current roadmap.
 
 ## Scope decisions
 
@@ -138,7 +138,23 @@
 - Isolated FastAPI integration check passed: settings read/write, schedule validation, and the production frontend route.
 - CPU percentage is a per-job thread target, not a hard Windows CPU utilization cap.
 
-## Next
+## Phase 8 — Integration, optimization, and documentation
 
-- Phase 8: integration optimization and documentation completion.
+**Status:** Complete.
+
+- [x] Added an isolated FastAPI/worker integration test spanning import, inspection, analysis, rendering, metadata, private upload, and analytics persistence
+- [x] Added a real FFmpeg synthetic-video render check with ffprobe output validation
+- [x] Fixed a worker JSON import-scoping bug found by end-to-end metadata generation
+- [x] Added an explicit HTTPX dependency for FastAPI TestClient on clean installs
+- [x] Added integration test instructions and documented mock boundaries and live-service requirements
+- [x] Updated the README, changelog, system design, user guide, implementation status, and integration instructions
+
+## Phase 8 verification
+
+- `python -m unittest discover -s backend/tests -v`: 29 tests passed, including the full mocked pipeline and actual FFmpeg render integration checks.
+- `npm --prefix frontend run build`: TypeScript check and Vite production build passed.
+- `python -m compileall -q backend/clipforge backend/tests`: passed.
+- Integration test confirmed the source video bytes remain unchanged through the workflow.
+- Real render produced a valid H.264 1080 × 1920 MP4 with a 3-second duration and generated SRT.
+- No live Google upload was run; OAuth/channel consent stays outside automated integration testing.
 

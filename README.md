@@ -4,7 +4,7 @@ ClipForge AI is a local-first gaming content studio for turning recordings you o
 
 ## Current status
 
-Phase 1 is complete: dashboard, saved settings, database foundation, and hardware checks. Phase 3 is complete: authorized local import, FFmpeg inspection, faster-whisper transcription, SRT output, and deterministic highlight ranking. Phase 4 is complete: candidate trimming, 9:16 rendering, editable captions, and local preview/download. Phase 5 is complete: local metadata generation and editing with Ollama and an offline fallback. Phase 6 is complete: desktop OAuth with PKCE, DPAPI-protected credentials, resumable private YouTube uploads, duplicate prevention, retry, and channel analytics. Phase 7 is complete: a weekly local-time processing schedule, effective worker concurrency, and per-job CPU thread budgets. Dashboard totals are queried from SQLite, so a fresh database shows zero activity rather than sample metrics.
+Phase 1 is complete: dashboard, saved settings, database foundation, and hardware checks. Phase 3 is complete: authorized local import, FFmpeg inspection, faster-whisper transcription, SRT output, and deterministic highlight ranking. Phase 4 is complete: candidate trimming, 9:16 rendering, editable captions, and local preview/download. Phase 5 is complete: local metadata generation and editing with Ollama and an offline fallback. Phase 6 is complete: desktop OAuth with PKCE, DPAPI-protected credentials, resumable private YouTube uploads, duplicate prevention, retry, and channel analytics. Phase 7 is complete: a weekly local-time processing schedule, effective worker concurrency, and per-job CPU thread budgets. Phase 8 is complete: repeatable API/worker integration coverage, a real synthetic FFmpeg render check, and documentation updates. Dashboard totals are queried from SQLite, so a fresh database shows zero activity rather than sample metrics.
 
 ## Run in development
 
@@ -36,6 +36,8 @@ Phase 1 is complete: dashboard, saved settings, database foundation, and hardwar
 For a single local server, build the UI with `npm --prefix frontend run build`, then start the API. FastAPI serves the built frontend on port 8000.
 
 ## Verify the backend and UI
+
+See [INTEGRATION_TESTING.md](INTEGRATION_TESTING.md) for what the automated suite exercises and which external services are mocked.
 
 ```powershell
 $env:PYTHONPATH = "backend"

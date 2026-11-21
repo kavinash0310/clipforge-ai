@@ -73,8 +73,6 @@ def _process_job(job: dict[str, Any]) -> None:
             elif job["job_type"] == "generate_metadata" and job.get("clip_id"):
                 set_clip_metadata_status(job["clip_id"], "paused")
             elif job["job_type"] == "youtube_upload" and job.get("clip_id"):
-                import json
-
                 event_id = json.loads(job.get("payload_json") or "{}").get("event_id")
                 if event_id:
                     set_youtube_publication_status(event_id, "paused")

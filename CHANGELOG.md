@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — Phase 7 scheduling and resources
+## Unreleased — Phase 8 integration and documentation
 
 - Added a local FastAPI service and SQLite database initialization.
 - Added a React/TypeScript dashboard with database-backed workspace totals and honest empty states.
@@ -19,8 +19,13 @@
 - Enforced configured worker slots while serializing CPU-intensive analysis, rendering, and local metadata generation.
 - Applied the CPU thread budget to faster-whisper and FFmpeg processing.
 - Documented schedule boundaries and the thread budget's limits in the API and user guide.
+- Added a repeatable FastAPI/worker end-to-end test from source import through YouTube analytics persistence with external services mocked.
+- Added a real synthetic FFmpeg render integration test that checks vertical dimensions, duration, and SRT output.
+- Fixed worker JSON payload decoding for metadata jobs and declared the HTTP test client dependency explicitly.
+- Added integration test instructions and updated the roadmap for Phase 8 completion.
 - Removed the inactive review-queue dashboard placeholder and migrate away the empty legacy table.
 - Pinned PyAV below 19 to keep released faster-whisper compatible.
 - Added project, installation, API, database, security, rights, user, learning, and status documentation.
-- Verified 21 backend checks, production UI build, OAuth callback/token tests, private/resumable upload and analytics API mocks, synthetic FFmpeg rendering, metadata editing, retries, and source-file integrity.
+- Phase 6 verification passed 21 backend checks, OAuth callback/token tests, private/resumable upload and analytics API mocks, metadata editing, retries, and source-file integrity.
+- Phase 8 verification passed 29 backend checks, the production UI build, compilation, a full mocked API/worker workflow, and a real synthetic FFmpeg render.
 
