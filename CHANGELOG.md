@@ -6,6 +6,7 @@
 - Added the workflow stages **Make it your format**, **Frame your moment**, **Give it a voice**, and **Style & extras**, with platform aspect presets, 720p/1080p/4K output, source/24/30/60 fps, more crop/blur positions, transcription language, caption presets, hooks, creator marks, and music beds.
 - Added an optional transcript phrase boost for highlight ranking and ASS subtitle-file import alongside SRT/WebVTT.
 - Added source-video review with a 9:16 safe-area guide and I/O/Space trim shortcuts.
+- Added draggable gameplay and facecam regions with gameplay-only, picture-in-picture, stacked, and side-by-side render layouts.
 - Added an **Upload all privately** batch action beside YouTube scheduling and the existing all-clips download.
 - Added live local-stream capture with a rolling segment buffer, 15/30/45-second clips, status polling, and automatic queuing into transcription, highlight selection, captioning, and rendering.
 - Added loopback-only RTMP/SRT/UDP validation for live input and capture shutdown on app exit.

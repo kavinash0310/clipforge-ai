@@ -854,6 +854,7 @@ def create_render_job(
     timestamp = utc_now()
     options = render_options or {
         "aspect_ratio": "9:16", "format_preset": "youtube_shorts", "resolution": 1080, "frame_rate": "source",
+        "gameplay_box": None, "facecam_box": None, "facecam_position": "top_right", "facecam_size_percent": 31,
         "layout": "blur", "caption_style": "neon", "watermark_text": "",
         "opening_hook": "", "outro_text": "", "caption_font": "Arial", "caption_size": 50,
         "caption_text_color": "#FFFFFF", "caption_outline_color": "#351633", "caption_words_per_line": 5, "caption_animation": "static",
@@ -888,6 +889,7 @@ def create_render_job(
         rendered_metadata = json.loads(clip["render_metadata_json"] or "{}")
         current_options = rendered_metadata.get("settings") or {
             "aspect_ratio": "9:16", "format_preset": "youtube_shorts", "resolution": 1080, "frame_rate": "source",
+            "gameplay_box": None, "facecam_box": None, "facecam_position": "top_right", "facecam_size_percent": 31,
             "layout": "blur", "caption_style": "neon", "watermark_text": "",
             "opening_hook": "", "outro_text": "", "caption_font": "Arial", "caption_size": 50,
             "caption_text_color": "#FFFFFF", "caption_outline_color": "#351633", "caption_words_per_line": 5, "caption_animation": "static",

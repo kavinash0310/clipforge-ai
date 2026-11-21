@@ -226,14 +226,33 @@ class SubtitleEdits(BaseModel):
     segments: list[SubtitleSegmentEdit] = Field(max_length=300)
 
 
+class FrameRegion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
+    width: float = Field(ge=0.04, le=1)
+    height: float = Field(ge=0.04, le=1)
+
+    @model_validator(mode="after")
+    def fit_inside_source(self) -> "FrameRegion":
+        if self.x + self.width > 1.000001 or self.y + self.height > 1.000001:
+            raise ValueError("A frame region must fit within the source video.")
+        return self
+
+
 class RenderOptions(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     aspect_ratio: Literal["9:16", "1:1", "4:5", "16:9"] = "9:16"
-    layout: Literal["blur", "blur_top", "blur_bottom", "fit", "fill", "fill_top", "fill_bottom"] = "blur"
+    layout: Literal["blur", "blur_top", "blur_bottom", "fit", "fill", "fill_top", "fill_bottom", "gameplay_only", "facecam_overlay", "camera_top", "camera_bottom", "side_by_side"] = "blur"
     format_preset: Literal["youtube_shorts", "tiktok", "instagram_reels", "instagram_portrait", "square", "landscape", "custom"] = "custom"
     resolution: Literal[720, 1080, 2160] = 1080
     frame_rate: Literal["source", 24, 30, 60] = "source"
+    gameplay_box: FrameRegion | None = None
+    facecam_box: FrameRegion | None = None
+    facecam_position: Literal["top_left", "top_right", "bottom_left", "bottom_right", "bottom_center"] = "top_right"
+    facecam_size_percent: int = Field(default=31, ge=16, le=50)
     caption_style: Literal["neon", "impact", "clean", "hormozi", "mrbeast"] = "neon"
     watermark_text: str = Field(default="", max_length=60)
     opening_hook: str = Field(default="", max_length=100)
@@ -257,6 +276,10 @@ class RenderOptions(BaseModel):
         }
         if self.format_preset in ratio_by_preset:
             self.aspect_ratio = ratio_by_preset[self.format_preset]
+        if self.layout == "gameplay_only" and self.gameplay_box is None:
+            raise ValueError("Draw a gameplay region before choosing gameplay-only framing.")
+        if self.layout in {"facecam_overlay", "camera_top", "camera_bottom", "side_by_side"} and self.facecam_box is None:
+            raise ValueError("Draw a facecam region before choosing a camera layout.")
         return self
 
     @field_validator("watermark_text")

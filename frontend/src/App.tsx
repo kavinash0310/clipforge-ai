@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type PointerEvent } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -113,12 +113,19 @@ type QueueJob = Job & {
   clip_id?: string | null;
 };
 type SubtitleSegment = { start: number; end: number; text: string };
+type FrameRegion = { x: number; y: number; width: number; height: number };
+type FrameRegionKey = "gameplay_box" | "facecam_box";
+type SourceViewport = { left: number; top: number; width: number; height: number; stageWidth: number; stageHeight: number };
 type RenderOptions = {
   aspect_ratio: "9:16" | "1:1" | "4:5" | "16:9";
   format_preset: "youtube_shorts" | "tiktok" | "instagram_reels" | "instagram_portrait" | "square" | "landscape" | "custom";
   resolution: 720 | 1080 | 2160;
   frame_rate: "source" | 24 | 30 | 60;
-  layout: "blur" | "blur_top" | "blur_bottom" | "fit" | "fill" | "fill_top" | "fill_bottom";
+  layout: "blur" | "blur_top" | "blur_bottom" | "fit" | "fill" | "fill_top" | "fill_bottom" | "gameplay_only" | "facecam_overlay" | "camera_top" | "camera_bottom" | "side_by_side";
+  gameplay_box: FrameRegion | null;
+  facecam_box: FrameRegion | null;
+  facecam_position: "top_left" | "top_right" | "bottom_left" | "bottom_right" | "bottom_center";
+  facecam_size_percent: number;
   caption_style: "neon" | "impact" | "clean" | "hormozi" | "mrbeast";
   watermark_text: string;
   opening_hook: string;
@@ -134,7 +141,7 @@ type RenderOptions = {
   music_volume: number;
   music_fade_seconds: number;
 };
-const defaultRenderOptions: RenderOptions = { aspect_ratio: "9:16", format_preset: "youtube_shorts", resolution: 1080, frame_rate: "source", layout: "blur", caption_style: "neon", watermark_text: "", opening_hook: "", outro_text: "", caption_font: "Arial", caption_size: 50, caption_text_color: "#FFFFFF", caption_outline_color: "#351633", caption_words_per_line: 5, caption_animation: "static", music_asset_id: null, music_name: "", music_volume: 20, music_fade_seconds: 1.5 };
+const defaultRenderOptions: RenderOptions = { aspect_ratio: "9:16", format_preset: "youtube_shorts", resolution: 1080, frame_rate: "source", layout: "blur", gameplay_box: null, facecam_box: null, facecam_position: "top_right", facecam_size_percent: 31, caption_style: "neon", watermark_text: "", opening_hook: "", outro_text: "", caption_font: "Arial", caption_size: 50, caption_text_color: "#FFFFFF", caption_outline_color: "#351633", caption_words_per_line: 5, caption_animation: "static", music_asset_id: null, music_name: "", music_volume: 20, music_fade_seconds: 1.5 };
 type MetadataTone = "hype" | "funny" | "clean" | "competitive";
 type ClipMetadataForm = {
   game_name: string;
@@ -613,6 +620,9 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
   const [captionDraft, setCaptionDraft] = useState<SubtitleSegment[]>([]);
   const [trimDraft, setTrimDraft] = useState({ start_seconds: 0, end_seconds: 30 });
   const [renderOptions, setRenderOptions] = useState<RenderOptions>(defaultRenderOptions);
+  const [frameRegionMode, setFrameRegionMode] = useState<FrameRegionKey | null>(null);
+  const [frameBoxDraft, setFrameBoxDraft] = useState<{ key: FrameRegionKey; box: FrameRegion } | null>(null);
+  const [sourceViewport, setSourceViewport] = useState<SourceViewport | null>(null);
   const [clipBusy, setClipBusy] = useState(false);
   const [metadata, setMetadata] = useState<ClipMetadata | null>(null);
   const [metadataForm, setMetadataForm] = useState<ClipMetadataForm>({ game_name: "", tone: "hype", title: "", description: "", hashtags: [], tags: [] });
@@ -623,6 +633,26 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
   const musicFileRef = useRef<HTMLInputElement>(null);
   const creationMusicFileRef = useRef<HTMLInputElement>(null);
   const sourcePreviewRef = useRef<HTMLVideoElement>(null);
+  const frameBoxStartRef = useRef<{ x: number; y: number } | null>(null);
+
+  const updateSourceViewport = useCallback(() => {
+    const video = sourcePreviewRef.current;
+    const stage = video?.parentElement;
+    if (!video || !stage || !video.videoWidth || !video.videoHeight) return;
+    const videoRect = video.getBoundingClientRect();
+    const stageRect = stage.getBoundingClientRect();
+    const scale = Math.min(videoRect.width / video.videoWidth, videoRect.height / video.videoHeight);
+    const width = video.videoWidth * scale;
+    const height = video.videoHeight * scale;
+    setSourceViewport({
+      left: videoRect.left - stageRect.left + (videoRect.width - width) / 2,
+      top: videoRect.top - stageRect.top + (videoRect.height - height) / 2,
+      width,
+      height,
+      stageWidth: stageRect.width,
+      stageHeight: stageRect.height,
+    });
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -645,6 +675,11 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
     const timer = window.setInterval(() => void refresh(), 3500);
     return () => window.clearInterval(timer);
   }, [refresh]);
+
+  useEffect(() => {
+    window.addEventListener("resize", updateSourceViewport);
+    return () => window.removeEventListener("resize", updateSourceViewport);
+  }, [updateSourceViewport]);
 
   useEffect(() => {
     if (!selectedClipId) {
@@ -809,11 +844,89 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
   const trimDraftChanged = Boolean(selectedClip && (Math.abs(trimDraft.start_seconds - selectedClip.start_seconds) > 0.001 || Math.abs(trimDraft.end_seconds - selectedClip.end_seconds) > 0.001));
   const renderSettingsChanged = Boolean(selectedClip && JSON.stringify(selectedClip.render_metadata.settings ?? defaultRenderOptions) !== JSON.stringify(renderOptions));
 
+  const sourcePointFromEvent = (event: PointerEvent<HTMLDivElement>) => {
+    const video = sourcePreviewRef.current;
+    if (!video?.videoWidth || !video.videoHeight) return null;
+    const rect = video.getBoundingClientRect();
+    const scale = Math.min(rect.width / video.videoWidth, rect.height / video.videoHeight);
+    const width = video.videoWidth * scale;
+    const height = video.videoHeight * scale;
+    const left = rect.left + (rect.width - width) / 2;
+    const top = rect.top + (rect.height - height) / 2;
+    return {
+      x: Math.min(1, Math.max(0, (event.clientX - left) / width)),
+      y: Math.min(1, Math.max(0, (event.clientY - top) / height)),
+    };
+  };
+
+  const frameRegionStyle = (box: FrameRegion | null): CSSProperties => {
+    if (!box || !sourceViewport) return { display: "none" };
+    return {
+      left: `${sourceViewport.left + box.x * sourceViewport.width}px`,
+      top: `${sourceViewport.top + box.y * sourceViewport.height}px`,
+      width: `${box.width * sourceViewport.width}px`,
+      height: `${box.height * sourceViewport.height}px`,
+    };
+  };
+
+  const beginFrameRegion = (event: PointerEvent<HTMLDivElement>) => {
+    if (!frameRegionMode || !selectedClip || clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)) return;
+    const point = sourcePointFromEvent(event);
+    if (!point) return;
+    frameBoxStartRef.current = point;
+    setFrameBoxDraft({ key: frameRegionMode, box: { x: point.x, y: point.y, width: 0, height: 0 } });
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const moveFrameRegion = (event: PointerEvent<HTMLDivElement>) => {
+    const start = frameBoxStartRef.current;
+    const point = sourcePointFromEvent(event);
+    if (!start || !point || !frameRegionMode) return;
+    setFrameBoxDraft({ key: frameRegionMode, box: { x: Math.min(start.x, point.x), y: Math.min(start.y, point.y), width: Math.abs(point.x - start.x), height: Math.abs(point.y - start.y) } });
+  };
+
+  const finishFrameRegion = (event: PointerEvent<HTMLDivElement>) => {
+    const start = frameBoxStartRef.current;
+    const point = sourcePointFromEvent(event);
+    const key = frameRegionMode;
+    frameBoxStartRef.current = null;
+    if (!start || !point || !key) {
+      setFrameBoxDraft(null);
+      return;
+    }
+    const box = { x: Math.min(start.x, point.x), y: Math.min(start.y, point.y), width: Math.abs(point.x - start.x), height: Math.abs(point.y - start.y) };
+    setFrameBoxDraft(null);
+    setFrameRegionMode(null);
+    if (box.width < 0.04 || box.height < 0.04) {
+      setPageError("Draw a larger frame region so it can be used in the export.");
+      return;
+    }
+    setRenderOptions((options) => key === "gameplay_box"
+      ? { ...options, gameplay_box: box }
+      : { ...options, facecam_box: box });
+    setPageError(null);
+    setMessage(`${key === "gameplay_box" ? "Gameplay" : "Facecam"} region saved to the current clip style.`);
+  };
+
+  const clearFrameRegion = (key: FrameRegionKey) => {
+    setRenderOptions((options) => {
+      const nextLayout = (key === "gameplay_box" && options.layout === "gameplay_only")
+        || (key === "facecam_box" && ["facecam_overlay", "camera_top", "camera_bottom", "side_by_side"].includes(options.layout))
+        ? "blur"
+        : options.layout;
+      return key === "gameplay_box"
+        ? { ...options, gameplay_box: null, layout: nextLayout as RenderOptions["layout"] }
+        : { ...options, facecam_box: null, layout: nextLayout as RenderOptions["layout"] };
+    });
+  };
+
   const editClip = (clip: Clip | RecordingAnalysis["candidates"][number]) => {
     setSelectedClipId(clip.id);
     setCaptionDraft(clip.subtitles.map((segment) => ({ ...segment })));
     setTrimDraft({ start_seconds: clip.start_seconds, end_seconds: clip.end_seconds });
     setRenderOptions({ ...defaultRenderOptions, ...clip.render_metadata.settings, format_preset: clip.render_metadata.settings?.format_preset ?? "custom" });
+    setFrameRegionMode(null);
+    setFrameBoxDraft(null);
     metadataDirty.current = false;
     setPageError(null);
     window.setTimeout(() => {
@@ -1246,7 +1359,8 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
           <div className="analysis-summary"><span><strong>{analysis.transcript?.segments.length ?? 0}</strong> transcript segments</span><span><strong>{analysis.candidates.length}</strong> ranked candidates</span><span><strong>{analysis.analysis?.scene_cuts.length ?? 0}</strong> scene changes</span><span>Model: <strong>{analysis.transcript?.model_name}</strong> · CPU int8</span></div>
           {selectedRecording && <section className="source-review-panel">
             <div className="source-review-heading"><div><div className="section-overline">FRAME YOUR MOMENT</div><h4>Review the actual scene</h4><p>Play the source and set clip in/out points from the video. The dotted box shows the centered 9:16 safe area.</p></div><span>{formatDuration(selectedRecording.duration_seconds)} source</span></div>
-            <div className="source-preview-stage"><video ref={sourcePreviewRef} key={selectedRecording.id} controls preload="metadata" src={`/api/recordings/${encodeURIComponent(selectedRecording.id)}/source-preview`} /><div className="source-safe-zone" aria-hidden="true"><span>9:16 safe area</span></div></div>
+            <div className="source-preview-stage"><video ref={sourcePreviewRef} key={selectedRecording.id} controls preload="metadata" onLoadedMetadata={updateSourceViewport} src={`/api/recordings/${encodeURIComponent(selectedRecording.id)}/source-preview`} /><div className="source-safe-zone" aria-hidden="true"><span>9:16 safe area</span></div><div className={`source-region-overlay ${frameRegionMode ? "drawing" : ""}`} style={{ pointerEvents: frameRegionMode ? "auto" : "none" }} onPointerDown={beginFrameRegion} onPointerMove={moveFrameRegion} onPointerUp={finishFrameRegion} onPointerCancel={() => { frameBoxStartRef.current = null; setFrameBoxDraft(null); }}>{renderOptions.gameplay_box && <div className="source-region-box gameplay-region" style={frameRegionStyle(renderOptions.gameplay_box)}><span>Gameplay</span></div>}{renderOptions.facecam_box && <div className="source-region-box facecam-region" style={frameRegionStyle(renderOptions.facecam_box)}><span>Facecam</span></div>}{frameBoxDraft && <div className={`source-region-box region-draft ${frameBoxDraft.key === "gameplay_box" ? "gameplay-region" : "facecam-region"}`} style={frameRegionStyle(frameBoxDraft.box)} />}</div></div>
+            {selectedClip && selectedClip.recording_id === selectedAnalysisId && <div className="source-box-controls"><button className={`row-action-button ${frameRegionMode === "gameplay_box" ? "selected" : ""}`} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status) || !sourceViewport} onClick={() => { setFrameBoxDraft(null); setFrameRegionMode((mode) => mode === "gameplay_box" ? null : "gameplay_box"); }}>▧ {renderOptions.gameplay_box ? "Redraw gameplay area" : "Draw gameplay area"}</button>{renderOptions.gameplay_box && <button className="icon-button" aria-label="Clear gameplay area" title="Clear gameplay area" onClick={() => clearFrameRegion("gameplay_box")}>×</button>}<button className={`row-action-button ${frameRegionMode === "facecam_box" ? "selected" : ""}`} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status) || !sourceViewport} onClick={() => { setFrameBoxDraft(null); setFrameRegionMode((mode) => mode === "facecam_box" ? null : "facecam_box"); }}>▧ {renderOptions.facecam_box ? "Redraw facecam area" : "Draw facecam area"}</button>{renderOptions.facecam_box && <button className="icon-button" aria-label="Clear facecam area" title="Clear facecam area" onClick={() => clearFrameRegion("facecam_box")}>×</button>}<span>{frameRegionMode ? `Drag across the video to mark the ${frameRegionMode === "gameplay_box" ? "gameplay" : "facecam"}.` : "Draw boxes to use gameplay-only or camera layouts."}</span></div>}
             {selectedClip && selectedClip.recording_id === selectedAnalysisId && <div className="source-review-controls"><button className="row-action-button" disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onClick={() => setTrimFromPlayhead("in")}>I · Set in</button><button className="row-action-button" disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onClick={() => setTrimFromPlayhead("out")}>O · Set out</button><span>Space plays/pauses · {trimDraft.start_seconds.toFixed(1)}s → {trimDraft.end_seconds.toFixed(1)}s</span></div>}
           </section>}
           <div className="candidate-section-heading"><div><div className="section-overline">AI SELECTED MOMENTS</div><h4>Candidate highlights</h4></div><span>Clips, captions, and metadata are prepared in the background. You can still edit each result.</span></div>
@@ -1285,7 +1399,8 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
                   <label>Frame<select value={renderOptions.aspect_ratio} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, aspect_ratio: event.target.value as RenderOptions["aspect_ratio"], format_preset: "custom" }))}><option value="9:16">9:16 · Shorts / Reels</option><option value="1:1">1:1 · Square</option><option value="4:5">4:5 · Portrait</option><option value="16:9">16:9 · Landscape</option></select></label>
                   <label>Resolution<select value={renderOptions.resolution} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, resolution: Number(event.target.value) as RenderOptions["resolution"] }))}><option value={720}>720p</option><option value={1080}>1080p</option><option value={2160}>4K</option></select></label>
                   <label>Frame rate<select value={renderOptions.frame_rate} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, frame_rate: event.target.value === "source" ? "source" : Number(event.target.value) as 24 | 30 | 60 }))}><option value="source">Keep source</option><option value={24}>24 fps</option><option value={30}>30 fps</option><option value={60}>60 fps</option></select></label>
-                  <label>Layout<select value={renderOptions.layout} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, layout: event.target.value as RenderOptions["layout"] }))}><option value="blur">Blurred fill</option><option value="blur_top">Blur fill · focus top</option><option value="blur_bottom">Blur fill · focus bottom</option><option value="fit">Fit with bars</option><option value="fill">Crop to fill · center</option><option value="fill_top">Crop to fill · top</option><option value="fill_bottom">Crop to fill · bottom</option></select></label>
+                  <label>Layout<select value={renderOptions.layout} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, layout: event.target.value as RenderOptions["layout"] }))}><option value="blur">Blurred fill</option><option value="blur_top">Blur fill · focus top</option><option value="blur_bottom">Blur fill · focus bottom</option><option value="fit">Fit with bars</option><option value="fill">Crop to fill · center</option><option value="fill_top">Crop to fill · top</option><option value="fill_bottom">Crop to fill · bottom</option><option value="gameplay_only" disabled={!renderOptions.gameplay_box}>Gameplay only · drawn area</option><option value="facecam_overlay" disabled={!renderOptions.facecam_box}>Gameplay + facecam overlay</option><option value="camera_top" disabled={!renderOptions.facecam_box}>Camera above gameplay</option><option value="camera_bottom" disabled={!renderOptions.facecam_box}>Camera below gameplay</option><option value="side_by_side" disabled={!renderOptions.facecam_box}>Side-by-side</option></select></label>
+                  {renderOptions.layout === "facecam_overlay" && <><label>Facecam position<select value={renderOptions.facecam_position} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, facecam_position: event.target.value as RenderOptions["facecam_position"] }))}><option value="top_left">Top left</option><option value="top_right">Top right</option><option value="bottom_left">Bottom left</option><option value="bottom_right">Bottom right</option><option value="bottom_center">Bottom center</option></select></label><label>Facecam size<input type="range" min={16} max={50} value={renderOptions.facecam_size_percent} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, facecam_size_percent: Number(event.target.value) }))} /><small>{renderOptions.facecam_size_percent}% of frame</small></label></>}
                   <label>Captions<select value={renderOptions.caption_style} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => { const style = event.target.value as RenderOptions["caption_style"]; setRenderOptions((options) => ({ ...options, caption_style: style, caption_font: style === "impact" ? "Impact" : "Arial" })); }}><option value="neon">GTA Neon</option><option value="impact">Impact</option><option value="clean">Clean</option><option value="hormozi">Hormozi</option><option value="mrbeast">MrBeast</option></select></label>
                   <label>Caption motion<select value={renderOptions.caption_animation} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, caption_animation: event.target.value as RenderOptions["caption_animation"] }))}><option value="static">Static lines</option><option value="word_highlight">Word highlight</option></select></label>
                   <label>Watermark<input maxLength={60} value={renderOptions.watermark_text} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, watermark_text: event.target.value }))} placeholder="Optional creator name" /></label>

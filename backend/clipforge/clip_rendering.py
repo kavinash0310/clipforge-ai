@@ -148,6 +148,16 @@ def _write_atomic(destination: Path, content: str) -> None:
     os.replace(temporary, destination)
 
 
+def _region_crop(region: dict[str, float] | None) -> str:
+    if not region:
+        return ""
+    x = min(1.0, max(0.0, float(region["x"])))
+    y = min(1.0, max(0.0, float(region["y"])))
+    width = min(1.0 - x, max(0.01, float(region["width"])))
+    height = min(1.0 - y, max(0.01, float(region["height"])))
+    return f"crop=iw*{width:.6f}:ih*{height:.6f}:iw*{x:.6f}:ih*{y:.6f}"
+
+
 def render_vertical_clip(
     *,
     source: Path,
@@ -177,7 +187,14 @@ def render_vertical_clip(
     music_volume = max(0, min(int(options.get("music_volume", 20)), 100)) / 100
     music_fade_seconds = max(0.0, min(float(options.get("music_fade_seconds", 1.5)), 5.0))
     dimensions = {"9:16": (1080, 1920), "1:1": (1080, 1080), "4:5": (1080, 1350), "16:9": (1920, 1080)}
-    supported_layouts = {"blur", "blur_top", "blur_bottom", "fit", "fill", "fill_top", "fill_bottom"}
+    supported_layouts = {
+        "blur", "blur_top", "blur_bottom", "fit", "fill", "fill_top", "fill_bottom",
+        "gameplay_only", "facecam_overlay", "camera_top", "camera_bottom", "side_by_side",
+    }
+    gameplay_box = options.get("gameplay_box")
+    facecam_box = options.get("facecam_box")
+    facecam_position = options.get("facecam_position", "top_right")
+    facecam_size_percent = max(16, min(int(options.get("facecam_size_percent", 31)), 50))
     resolution = int(options.get("resolution", 1080))
     frame_rate = options.get("frame_rate", "source")
     if resolution not in {720, 1080, 2160}:
@@ -233,6 +250,55 @@ def render_vertical_clip(
         )
     elif layout == "fit":
         framing = f"[0:v]scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black[framed];"
+    elif layout == "gameplay_only":
+        if not gameplay_box:
+            raise ValueError("Draw a gameplay region before choosing gameplay-only framing.")
+        framing = f"[0:v]{_region_crop(gameplay_box)},scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}[framed];"
+    elif layout == "facecam_overlay":
+        if not facecam_box:
+            raise ValueError("Draw a facecam region before choosing a camera layout.")
+        camera_width = max(96, (round(width * facecam_size_percent / 100) // 2) * 2)
+        camera_height = max(96, (round(height * facecam_size_percent / 100) // 2) * 2)
+        game_crop = f"{_region_crop(gameplay_box)}," if gameplay_box else ""
+        margin_x = round(width * 0.04)
+        margin_y = round(height * 0.04)
+        overlay_position = {
+            "top_left": f"{margin_x}:{margin_y}",
+            "top_right": f"W-w-{margin_x}:{margin_y}",
+            "bottom_left": f"{margin_x}:H-h-{margin_y}",
+            "bottom_right": f"W-w-{margin_x}:H-h-{margin_y}",
+            "bottom_center": f"(W-w)/2:H-h-{margin_y}",
+        }.get(facecam_position, f"W-w-{margin_x}:{margin_y}")
+        framing = (
+            f"[0:v]split=2[bg][cam];[bg]{game_crop}scale={width}:{height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height}[bgv];[cam]{_region_crop(facecam_box)},"
+            f"scale={camera_width}:{camera_height}:force_original_aspect_ratio=decrease:force_divisible_by=2[camv];"
+            f"[bgv][camv]overlay={overlay_position}[framed];"
+        )
+    elif layout in {"camera_top", "camera_bottom"}:
+        if not facecam_box:
+            raise ValueError("Draw a facecam region before choosing a camera layout.")
+        camera_height = (round(height * 0.34) // 2) * 2
+        game_height = height - camera_height
+        game_crop = f"{_region_crop(gameplay_box)}," if gameplay_box else ""
+        framing = (
+            f"[0:v]split=2[game][cam];[game]{game_crop}scale={width}:{game_height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{game_height}[gamev];[cam]{_region_crop(facecam_box)},"
+            f"scale={width}:{camera_height}:force_original_aspect_ratio=increase,crop={width}:{camera_height}[camv];"
+            f"{('[camv][gamev]vstack=inputs=2' if layout == 'camera_top' else '[gamev][camv]vstack=inputs=2')}[framed];"
+        )
+    elif layout == "side_by_side":
+        if not facecam_box:
+            raise ValueError("Draw a facecam region before choosing a camera layout.")
+        gameplay_width = width // 2
+        camera_width = width - gameplay_width
+        game_crop = f"{_region_crop(gameplay_box)}," if gameplay_box else ""
+        framing = (
+            f"[0:v]split=2[game][cam];[game]{game_crop}scale={gameplay_width}:{height}:force_original_aspect_ratio=increase,"
+            f"crop={gameplay_width}:{height}[gamev];[cam]{_region_crop(facecam_box)},"
+            f"scale={camera_width}:{height}:force_original_aspect_ratio=increase,crop={camera_width}:{height}[camv];"
+            "[gamev][camv]hstack=inputs=2[framed];"
+        )
     else:
         crop_y = "0" if layout == "fill_top" else f"in_h-{height}" if layout == "fill_bottom" else f"(in_h-{height})/2"
         framing = f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}:(in_w-{width})/2:{crop_y}[framed];"
@@ -320,6 +386,8 @@ def render_vertical_clip(
             "settings": {
                 "aspect_ratio": aspect_ratio, "format_preset": options.get("format_preset", "youtube_shorts"),
                 "resolution": resolution, "frame_rate": frame_rate, "layout": layout, "caption_style": caption_style,
+                "gameplay_box": gameplay_box, "facecam_box": facecam_box,
+                "facecam_position": facecam_position, "facecam_size_percent": facecam_size_percent,
                 "watermark_text": watermark_text, "opening_hook": opening_hook, "outro_text": outro_text,
                 "caption_font": caption_font,
                 "caption_size": caption_size, "caption_text_color": caption_text_color,
