@@ -55,7 +55,7 @@ flowchart LR
 
 ## Operating boundaries
 
-The service binds to loopback. The browser UI uses same-origin API paths in a production build and a narrow localhost proxy in development. SQLite contains application state, not video bytes. The output directory is separate from source directories. Render jobs reference a selected candidate and its clip-relative caption edits; FFmpeg writes a new MP4 and SRT under app data. YouTube is an opt-in desktop OAuth integration; uploads are explicitly private and resumable, and analytics are read from the connected channel.
+The service binds to loopback. The browser UI uses same-origin API paths in a production build and a narrow localhost proxy in development. SQLite contains application state, not video bytes. The output directory is separate from source directories and can be configured with `CLIPFORGE_OUTPUT_DIR`. Render jobs reference a selected candidate and its clip-relative caption edits; FFmpeg writes a new MP4 and SRT under the configured output directory. YouTube is an opt-in desktop OAuth integration; uploads are explicitly private and resumable, and analytics are read from the connected channel.
 
 Transcription uses CPU `int8` to keep the machine's 4 GB GPU available to the desktop and other local tools. The first analysis downloads the selected faster-whisper model into app data. Candidate scoring is deterministic and combines audio energy, speech context, excitement phrases, and scene-change counts; its score is a ranking aid for human review.
 

@@ -34,7 +34,7 @@ The first analysis downloads the selected faster-whisper model into the app data
 
 To check render support, run `ffmpeg -hide_banner -encoders` and confirm `libx264`, then run `ffmpeg -hide_banner -filters` and confirm `subtitles`.
 
-## Data location
+## Data and output locations
 
-Default Windows data: `%LOCALAPPDATA%\ClipForgeAI`. Set `CLIPFORGE_DATA_DIR` before starting the service to select another directory. Keep the app database, generated outputs, and credentials out of Git.
+Default Windows app data: `%LOCALAPPDATA%\ClipForgeAI`; generated video output defaults to `%LOCALAPPDATA%\ClipForgeAI\output`. Set `CLIPFORGE_DATA_DIR` before starting the service to move the database, models, and OAuth credentials. Set `CLIPFORGE_OUTPUT_DIR` to choose a separate folder for generated videos. For example, in the backend terminal run `$env:CLIPFORGE_OUTPUT_DIR = "D:\Clip Forge"` before launching Uvicorn. Restart the backend after changing either variable. Keep the app database, generated outputs, and credentials out of Git.
 

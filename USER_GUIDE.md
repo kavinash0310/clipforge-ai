@@ -22,7 +22,7 @@ Candidate scores rank audio peaks, speech, excitement cues, and scene changes. T
 2. Correct caption text, adjust each caption's in/out time, add a line, or remove one. Times are relative to the candidate clip.
 3. Save caption edits. Saving is required before a new render; edited captions make a prior preview stale until the next render completes.
 4. Select **Render vertical clip**. The local queue trims the candidate, scales it to 1080 × 1920, places the full gameplay frame over a blurred background, and burns in the saved captions.
-5. Preview the rendered MP4 in the editor or download the MP4 and clip SRT. Generated files are stored under `%LOCALAPPDATA%\ClipForgeAI\output`; the original recording remains untouched.
+5. Preview the rendered MP4 in the editor or download the MP4 and clip SRT. Generated files are stored under `CLIPFORGE_OUTPUT_DIR` when configured, or `%LOCALAPPDATA%\ClipForgeAI\output` by default; the original recording remains untouched.
 
 Rendering uses FFmpeg's `libx264` encoder and subtitles/libass filter. If a render fails, the queue retains the error and offers a retry. Caption edits are locked while the render is queued, running, or paused.
 

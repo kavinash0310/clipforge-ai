@@ -147,11 +147,12 @@
 - [x] Fixed a worker JSON import-scoping bug found by end-to-end metadata generation
 - [x] Added an explicit HTTPX dependency for FastAPI TestClient on clean installs
 - [x] Added integration test instructions and documented mock boundaries and live-service requirements
+- [x] Added a configurable generated-video output path for user-selected storage locations
 - [x] Updated the README, changelog, system design, user guide, implementation status, and integration instructions
 
 ## Phase 8 verification
 
-- `python -m unittest discover -s backend/tests -v`: 29 tests passed, including the full mocked pipeline and actual FFmpeg render integration checks.
+- `python -m unittest discover -s backend/tests -v`: 31 tests passed, including the full mocked pipeline, output-path settings, and actual FFmpeg render integration checks.
 - `npm --prefix frontend run build`: TypeScript check and Vite production build passed.
 - `python -m compileall -q backend/clipforge backend/tests`: passed.
 - Integration test confirmed the source video bytes remain unchanged through the workflow.

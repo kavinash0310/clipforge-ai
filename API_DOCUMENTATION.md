@@ -2,6 +2,8 @@
 
 The local API defaults to `http://127.0.0.1:8000`. Interactive OpenAPI documentation is available at `/docs` while the service is running.
 
+Generated MP4 and SRT files are written under `CLIPFORGE_OUTPUT_DIR` when configured, or `%LOCALAPPDATA%\ClipForgeAI\output` by default on Windows. Set the variable before starting the backend and restart the service after changing it.
+
 ## `GET /api/health`
 
 Returns service name, version, and status. Does not expose local paths.

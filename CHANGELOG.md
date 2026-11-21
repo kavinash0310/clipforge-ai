@@ -22,10 +22,11 @@
 - Added a repeatable FastAPI/worker end-to-end test from source import through YouTube analytics persistence with external services mocked.
 - Added a real synthetic FFmpeg render integration test that checks vertical dimensions, duration, and SRT output.
 - Fixed worker JSON payload decoding for metadata jobs and declared the HTTP test client dependency explicitly.
+- Added a configurable generated-video output directory with support for paths containing spaces.
 - Added integration test instructions and updated the roadmap for Phase 8 completion.
 - Removed the inactive review-queue dashboard placeholder and migrate away the empty legacy table.
 - Pinned PyAV below 19 to keep released faster-whisper compatible.
 - Added project, installation, API, database, security, rights, user, learning, and status documentation.
 - Phase 6 verification passed 21 backend checks, OAuth callback/token tests, private/resumable upload and analytics API mocks, metadata editing, retries, and source-file integrity.
-- Phase 8 verification passed 29 backend checks, the production UI build, compilation, a full mocked API/worker workflow, and a real synthetic FFmpeg render.
+- Phase 8 verification passed 31 backend checks, the production UI build, compilation, a full mocked API/worker workflow, and a real synthetic FFmpeg render.
 

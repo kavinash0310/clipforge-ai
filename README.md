@@ -1,6 +1,6 @@
 # ClipForge AI
 
-ClipForge AI is a local-first gaming content studio for turning recordings you own or are authorized to use into reviewed short-form clips. Originals remain at their current paths. The app stores its database, local Whisper models, transcripts, subtitles, and generated outputs under `%LOCALAPPDATA%\ClipForgeAI` on Windows.
+ClipForge AI is a local-first gaming content studio for turning recordings you own or are authorized to use into reviewed short-form clips. Originals remain at their current paths. The app stores its database, local Whisper models, transcripts, subtitles, and generated outputs under `%LOCALAPPDATA%\ClipForgeAI` on Windows by default. Set `CLIPFORGE_OUTPUT_DIR` to save rendered video files in a different folder.
 
 ## Current status
 
@@ -45,7 +45,7 @@ python -m unittest discover -s backend/tests -v
 npm --prefix frontend run build
 ```
 
-The current verification passed 21 backend checks, the TypeScript/Vite production build, Python compilation, and mocked OAuth/upload/analytics and database lifecycle checks. Live Google account access requires the user's own Desktop OAuth client file.
+The current verification passed 31 backend tests, the TypeScript/Vite production build, Python compilation, a full mocked API/worker workflow, and a real synthetic FFmpeg render. A live YouTube connection requires a user-provided Desktop OAuth client file and Google account consent.
 
-See [INSTALLATION.md](INSTALLATION.md), [USER_GUIDE.md](USER_GUIDE.md), and [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for current behavior and the next milestones.
+See [INSTALLATION.md](INSTALLATION.md) for setup and custom output paths, [USER_GUIDE.md](USER_GUIDE.md) for the workflow, and [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for completed phases.
 
