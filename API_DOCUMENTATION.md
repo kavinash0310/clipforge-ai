@@ -30,7 +30,7 @@ Opens the native Windows video picker and returns the selected path or `null` wh
 
 ## `POST /api/recordings/{recording_id}/analyze`
 
-Queues transcription and highlight analysis for an inspected, authorized recording. Repeated requests return the existing active analysis job. The first run downloads the configured model; audio decoding, transcription, and scoring then run locally. Interrupted analysis can be retried from the start.
+Accepts `{"clip_count":1,"clip_duration_seconds":30}`; count is 1–100 (default 1) and duration is 15–45 seconds (default 30). Queues local transcription and highlight analysis for an inspected, authorized recording, then automatically queues a vertical render and metadata generation for each returned candidate. Repeated requests return the existing active analysis job. The requested count is a maximum because low-signal sources may yield fewer candidates.
 
 ## `GET /api/recordings/{recording_id}/analysis`
 
@@ -56,6 +56,10 @@ Queues an idempotent local `render_clip` job for an authorized candidate. FFmpeg
 
 Stream a completed local MP4 inline for the editor or download it as an attachment. Paths are resolved under the ClipForge output directory.
 
+## `POST /api/clips/download-all`
+
+Accepts `{"clip_ids":["..."]}` for 1–500 unique rendered clip IDs and returns `clipforge-clips.zip`. The bundle includes only rendered files inside the configured output directory.
+
 ## `GET /api/clips/{clip_id}/subtitles`
 
 Downloads an SRT generated from the current saved caption edits, including edits made since the last render.
@@ -66,18 +70,19 @@ Downloads an SRT generated from the current saved caption edits, including edits
 - `POST /api/clips/{clip_id}/metadata/generate` accepts `{"game_name":"Valorant","tone":"hype"}` and queues a `generate_metadata` job. Tone values are `hype`, `funny`, `clean`, or `competitive`. The worker calls the configured local Ollama endpoint, then falls back to offline templates if the model is unavailable or returns invalid output.
 - `PATCH /api/clips/{clip_id}/metadata` saves edited metadata. The request fields are `game_name`, `tone`, `title`, `description`, `hashtags`, and `tags`.
 
-Generated metadata is a draft and must be checked for accuracy. It does not assess copyright status or guarantee platform claim/strike outcomes.
+Generated metadata is a draft and must be checked for accuracy. Tags are kept relevant to the clip; they do not guarantee reach.
 
 ## YouTube routes
 
 - `GET /api/youtube/status` reports whether the Desktop OAuth JSON is configured, whether a channel is connected, and any local credential-store error.
 - `POST /api/youtube/connect` starts a system-browser Google OAuth flow and returns `authorization_url`. It uses PKCE, state validation, and a temporary loopback callback bound to `127.0.0.1`.
 - `DELETE /api/youtube/connect` revokes the saved token when reachable and removes the local DPAPI credential blob. Publication history remains in SQLite.
-- `GET /api/youtube/publications` lists publication status, progress, private video links, failures, and cached analytics.
+- `GET /api/youtube/publications` lists publication status, progress, scheduled times, video links, failures, and cached analytics.
 - `POST /api/clips/{clip_id}/youtube-upload` queues one resumable upload for a completed, authorized clip. Privacy is always `private`. Repeated requests return the existing publication; a failed upload must use `POST /api/jobs/{job_id}/retry` to resume the existing record/session.
+- `POST /api/youtube/schedule` accepts `{"clip_ids":["..."],"start_at":"2026-12-01T09:00:00+05:30","interval_minutes":90}` for 1–100 unique rendered clips with completed metadata. `start_at` must include a timezone and be at least 15 minutes in the future. Each following clip is offset by `interval_minutes` (15–4320, default 90). Videos are uploaded as private with YouTube's `status.publishAt`, then published by YouTube at the scheduled time.
 - `POST /api/youtube/analytics/refresh` requests the latest available 28-day views, likes, comments, and shares for completed YouTube publications, saves the per-video result, and returns the updated publication list.
 
-Place a Google Desktop OAuth client JSON at `%LOCALAPPDATA%\ClipForgeAI\client_secrets.json` (or in the configured `CLIPFORGE_DATA_DIR`). Enable YouTube Data API v3 and YouTube Analytics API in its project. The OAuth client file and OAuth grants are user-managed; the app does not include a shared client credential. Google consent is required for the account to grant channel scopes. Upload privacy is explicitly set because `videos.insert` defaults to public when privacy is omitted. See the [Desktop OAuth flow](https://developers.google.com/identity/protocols/oauth2/native-app), [video insert API](https://developers.google.com/youtube/data/reference/rest/v3/videos/insert), and [Analytics reports API](https://developers.google.com/youtube/analytics/reference/reports/query).
+Place a Google Desktop OAuth client JSON at `%LOCALAPPDATA%\ClipForgeAI\client_secrets.json` (or in the configured `CLIPFORGE_DATA_DIR`). Enable YouTube Data API v3 and YouTube Analytics API in its project. The OAuth client file and OAuth grants are user-managed; the app does not include a shared client credential. Google consent is required for the account to grant channel scopes. Scheduled videos use YouTube's private-until-publish scheduling. ClipForge imports local files and does not download arbitrary YouTube links. See the [Desktop OAuth flow](https://developers.google.com/identity/protocols/oauth2/native-app), [video insert API](https://developers.google.com/youtube/data/reference/rest/v3/videos/insert), and [Analytics reports API](https://developers.google.com/youtube/analytics/reference/reports/query).
 
 ## `GET /api/jobs`
 

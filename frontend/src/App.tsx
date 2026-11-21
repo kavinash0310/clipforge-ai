@@ -6,11 +6,13 @@ import {
   ArrowUpRight,
   BarChart3,
   Check,
+  CalendarClock,
   ChevronDown,
   Clock3,
   CircleHelp,
   Clapperboard,
   Cpu,
+  Download,
   ExternalLink,
   Film,
   Gauge,
@@ -146,6 +148,7 @@ type Clip = {
   upload_description: string;
   upload_hashtags: string[];
   upload_tags: string[];
+  upload_metadata_status: string;
 };
 type YouTubeConnection = {
   configured: boolean;
@@ -167,6 +170,7 @@ type YouTubePublication = {
   error_message: string | null;
   created_at: string;
   updated_at: string;
+  scheduled_at: string | null;
   clip_title: string;
   upload_title: string | null;
   video_url: string | null;
@@ -221,6 +225,13 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(body?.detail ?? `Request failed (${response.status})`);
   }
   return response.json() as Promise<T>;
+}
+
+function localDateTimeInput(minutesFromNow = 15) {
+  const minute = 60_000;
+  const date = new Date(Math.ceil((Date.now() + minutesFromNow * minute) / minute) * minute);
+  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+  return date.toISOString().slice(0, 16);
 }
 
 function formatBytes(value: number | null | undefined) {
@@ -540,6 +551,8 @@ function MediaPage({ onRefresh }: { onRefresh: () => void }) {
   const [clips, setClips] = useState<Clip[]>([]);
   const [path, setPath] = useState("");
   const [authorized, setAuthorized] = useState(false);
+  const [clipCount, setClipCount] = useState(1);
+  const [clipDuration, setClipDuration] = useState(30);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
@@ -654,8 +667,11 @@ function MediaPage({ onRefresh }: { onRefresh: () => void }) {
     setMessage(null);
     setPageError(null);
     try {
-      const result = await api<{ id: string; existing: boolean }>(`/api/recordings/${encodeURIComponent(recording.id)}/analyze`, { method: "POST", body: "{}" });
-      setMessage(result.existing ? "This recording is already in the analysis queue." : `Analysis queued for ${recording.display_name}. The first run downloads the selected model; transcription then runs locally.`);
+      const result = await api<{ id: string; existing: boolean }>(`/api/recordings/${encodeURIComponent(recording.id)}/analyze`, {
+        method: "POST",
+        body: JSON.stringify({ clip_count: clipCount, clip_duration_seconds: clipDuration }),
+      });
+      setMessage(result.existing ? "This recording is already in the analysis queue." : `ClipForge is looking for up to ${clipCount} highlights from ${recording.display_name}. It will caption, render, and draft metadata for each result.`);
       setSelectedAnalysisId(null);
       setAnalysis(null);
       await refresh();
@@ -813,7 +829,7 @@ function MediaPage({ onRefresh }: { onRefresh: () => void }) {
   return (
     <>
       <section className="page-heading media-heading">
-        <div><div className="eyebrow"><span className="eyebrow-line" /> LOCAL SOURCE LIBRARY</div><h1>Media library<span className="heading-period">.</span></h1><p className="heading-subtitle">Add a recording to inspect its streams and prepare it for analysis.</p></div>
+        <div><div className="eyebrow"><span className="eyebrow-line" /> LOCAL SOURCE LIBRARY</div><h1>Media library<span className="heading-period">.</span></h1><p className="heading-subtitle">Add a local video to analyze moments and build captioned clips.</p></div>
         <button className="secondary-button" onClick={() => void refresh()}><RefreshCw size={14} /> Refresh library</button>
       </section>
 
@@ -823,7 +839,7 @@ function MediaPage({ onRefresh }: { onRefresh: () => void }) {
       <section className="surface-card import-card">
         <div className="import-card-header">
           <div className="import-icon"><Upload size={18} /></div>
-          <div><div className="section-overline">ADD LOCAL RECORDING</div><h3>Bring a session into your studio</h3><p>The original stays at its current path. ClipForge only reads it and stores its own metadata.</p></div>
+          <div><div className="section-overline">ADD LOCAL RECORDING</div><h3>Bring a session into your studio</h3><p>Choose a local file or paste its path. ClipForge does not download videos from YouTube links.</p></div>
         </div>
         <form onSubmit={(event) => void importRecording(event)}>
           <div className="path-entry-row">
@@ -837,6 +853,14 @@ function MediaPage({ onRefresh }: { onRefresh: () => void }) {
           </div>
         </form>
         <div className="import-footnote"><ShieldCheck size={14} /><span>Authorization is required before processing. This confirmation does not clear rights to third-party music or game assets.</span></div>
+      </section>
+
+      <section className="surface-card clip-plan-card">
+        <div className="clip-plan-copy"><div className="section-overline">AI CLIP SETTINGS</div><h3>Choose how many clips to create</h3><p>ClipForge ranks gameplay moments, prepares captions, renders vertical video, and drafts relevant upload metadata automatically.</p></div>
+        <div className="clip-plan-fields">
+          <label>Number of clips<input type="number" min={1} max={100} value={clipCount} onChange={(event) => setClipCount(Math.max(1, Math.min(100, Number(event.target.value) || 1)))} /></label>
+          <label>Clip duration<select value={clipDuration} onChange={(event) => setClipDuration(Number(event.target.value))}><option value={15}>15 seconds</option><option value={30}>30 seconds</option><option value={45}>45 seconds</option></select></label>
+        </div>
       </section>
 
       <div className="media-columns">
@@ -878,7 +902,7 @@ function MediaPage({ onRefresh }: { onRefresh: () => void }) {
             <div className="analysis-header-actions"><a className="secondary-button subtitle-link" href={`/api/recordings/${encodeURIComponent(selectedAnalysisId)}/subtitles`} download><Upload size={13} /> Download SRT</a><button className="icon-button close-analysis" onClick={() => { setSelectedAnalysisId(null); setAnalysis(null); }} aria-label="Close analysis">×</button></div>
           </div>
           <div className="analysis-summary"><span><strong>{analysis.transcript?.segments.length ?? 0}</strong> transcript segments</span><span><strong>{analysis.candidates.length}</strong> ranked candidates</span><span><strong>{analysis.analysis?.scene_cuts.length ?? 0}</strong> scene changes</span><span>Model: <strong>{analysis.transcript?.model_name}</strong> · CPU int8</span></div>
-          <div className="candidate-section-heading"><div><div className="section-overline">HUMAN REVIEW</div><h4>Candidate highlights</h4></div><span>Scores rank signals; review before making clips.</span></div>
+          <div className="candidate-section-heading"><div><div className="section-overline">AI SELECTED MOMENTS</div><h4>Candidate highlights</h4></div><span>Clips, captions, and metadata are prepared in the background. You can still edit each result.</span></div>
           {analysis.candidates.length ? <div className="candidate-list">{analysis.candidates.map((candidate, index) => {
             const excerpt = analysis.transcript?.segments.filter((segment) => segment.end > candidate.start_seconds && segment.start < candidate.end_seconds).slice(0, 5) ?? [];
             const currentClip = clips.find((clip) => clip.id === candidate.id) ?? candidate;
@@ -887,7 +911,7 @@ function MediaPage({ onRefresh }: { onRefresh: () => void }) {
               <div className="candidate-body"><div className="candidate-topline"><h4>{candidate.title}</h4><span className="candidate-score">{candidate.score.toFixed(0)}<small>/100</small></span></div>
                 <div className="candidate-meta"><span><Clapperboard size={12} /> {formatDuration(candidate.start_seconds)}–{formatDuration(candidate.end_seconds)}</span>{candidate.reasons.map((reason) => <span className="reason-chip" key={reason}>{reason}</span>)}</div>
                 {excerpt.length ? <p className="candidate-excerpt">{excerpt.map((segment) => segment.text).join(" ")}</p> : <p className="candidate-excerpt muted-excerpt">No speech detected in this candidate window.</p>}
-                <div className="candidate-actions"><span className={`clip-state clip-state-${currentClip.status}`}>{currentClip.status.replaceAll("_", " ")}</span><button className="row-action-button clip-edit-button" onClick={() => editClip(currentClip)}><Film size={12} /> Edit captions & render</button></div>
+                <div className="candidate-actions"><span className={`clip-state clip-state-${currentClip.status}`}>{currentClip.status.replaceAll("_", " ")}</span><button className="row-action-button clip-edit-button" onClick={() => editClip(currentClip)}><Film size={12} /> Edit captions</button></div>
               </div>
               <div className="candidate-signals"><span>Audio <b>{Math.round(candidate.signals.audio_energy * 100)}%</b></span><span>Speech <b>{Math.round(candidate.signals.speech_density * 100)}%</b></span><span>Scene cuts <b>{candidate.signals.scene_changes}</b></span></div>
             </article>;
@@ -908,7 +932,7 @@ function MediaPage({ onRefresh }: { onRefresh: () => void }) {
                 </div>)}</div> : <div className="caption-empty">No speech was detected in this highlight. Add caption lines if needed.</div>}
                 <div className="clip-editor-actions"><button className="secondary-button" disabled={!captionDraftChanged || clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onClick={() => void saveCaptions()}>{clipBusy ? <LoaderCircle size={13} className="spin" /> : <Check size={13} />}{captionDraftChanged ? "Save captions" : "Captions saved"}</button><button className="primary-button" disabled={clipBusy || captionDraftChanged || ["queued", "rendering", "paused", "rendered"].includes(selectedClip.status)} onClick={() => void renderClip()}>{clipBusy ? <LoaderCircle size={13} className="spin" /> : selectedClip.status === "rendered" ? <Check size={13} /> : <Play size={13} />}{selectedClip.status === "rendered" ? "Rendered" : selectedClip.status === "paused" ? "Render paused" : selectedClip.status === "queued" || selectedClip.status === "rendering" ? "Rendering…" : "Render vertical clip"}</button></div>
                 <section className="metadata-editor" aria-label="Clip metadata">
-                  <div className="metadata-editor-heading"><div><div className="section-overline">PHASE 5 · LOCAL METADATA</div><strong>Title, description & tags</strong><span>Generate with local Ollama or use the offline fallback, then edit before saving. The draft avoids copying caption text, but cannot guarantee platform outcomes.</span></div><span className={`clip-state clip-state-${metadata?.status ?? "empty"}`}>{metadata?.status ?? "loading"}</span></div>
+                <div className="metadata-editor-heading"><div><div className="section-overline">AI UPLOAD METADATA</div><strong>Title, description & relevant tags</strong><span>Generated from the gameplay context, ready for you to review and edit.</span></div><span className={`clip-state clip-state-${metadata?.status ?? "empty"}`}>{metadata?.status ?? "loading"}</span></div>
                   {!metadata ? <div className="metadata-loading"><LoaderCircle size={14} className="spin" /> Loading saved metadata…</div> : <>
                     <div className="metadata-context-row"><label>Game or category<input maxLength={80} value={metadataForm.game_name} disabled={metadataWorking || metadataBusy} onChange={(event) => updateMetadata({ game_name: event.target.value })} placeholder="e.g. Valorant" /></label><label>Tone<select value={metadataForm.tone} disabled={metadataWorking || metadataBusy} onChange={(event) => updateMetadata({ tone: event.target.value as MetadataTone })}><option value="hype">Hype</option><option value="funny">Funny</option><option value="clean">Clean</option><option value="competitive">Competitive</option></select></label><button className="secondary-button metadata-generate-button" disabled={metadataBusy || metadataWorking} onClick={() => void generateMetadata()}>{metadataBusy ? <LoaderCircle size={13} className="spin" /> : <Sparkles size={13} />}{metadataWorking ? "Generating…" : "Generate metadata"}</button></div>
                     {metadata.error_message && <p className="clip-render-error"><AlertTriangle size={13} />{metadata.error_message}</p>}
@@ -936,6 +960,9 @@ function YouTubePage({ onRefresh }: { onRefresh: () => void }) {
   const [publications, setPublications] = useState<YouTubePublication[]>([]);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState<string | null>(null);
+  const [scheduleAt, setScheduleAt] = useState(() => localDateTimeInput(15));
+  const [minimumScheduleAt] = useState(() => localDateTimeInput(15));
+  const [scheduleInterval, setScheduleInterval] = useState(90);
   const [analyticsUpdatedAt, setAnalyticsUpdatedAt] = useState<string | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -1019,6 +1046,69 @@ function YouTubePage({ onRefresh }: { onRefresh: () => void }) {
     }
   };
 
+  const schedule = async (items: Clip[]) => {
+    if (!items.length) return;
+    const startAt = new Date(scheduleAt);
+    if (Number.isNaN(startAt.valueOf())) {
+      setPageError("Choose a valid schedule date and time.");
+      return;
+    }
+    setWorking("schedule");
+    setPageError(null);
+    setMessage(null);
+    try {
+      let queued = 0;
+      for (let offset = 0; offset < items.length; offset += 100) {
+        const batch = items.slice(offset, offset + 100);
+        const batchStart = new Date(startAt.valueOf() + offset * scheduleInterval * 60_000);
+        const result = await api<{ scheduled: Array<{ status: string }>; interval_minutes: number }>("/api/youtube/schedule", {
+          method: "POST",
+          body: JSON.stringify({
+            clip_ids: batch.map((clip) => clip.id),
+            start_at: batchStart.toISOString(),
+            interval_minutes: scheduleInterval,
+          }),
+        });
+        queued += result.scheduled.filter((item) => !["complete", "failed"].includes(item.status)).length;
+      }
+      setMessage(`${queued} ${queued === 1 ? "video" : "videos"} scheduled. Batch spacing: ${scheduleInterval} minutes.`);
+      await refresh();
+      onRefresh();
+    } catch (reason) {
+      setPageError(reason instanceof Error ? reason.message : "The YouTube schedule could not be created.");
+    } finally {
+      setWorking(null);
+    }
+  };
+
+  const downloadAll = async () => {
+    if (!renderedClips.length) return;
+    setWorking("download-all");
+    setPageError(null);
+    try {
+      const response = await fetch("/api/clips/download-all", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clip_ids: renderedClips.map((clip) => clip.id) }),
+      });
+      if (!response.ok) {
+        const error = await response.json().catch(() => null);
+        throw new Error(error?.detail ?? `Download failed (${response.status})`);
+      }
+      const objectUrl = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = "clipforge-clips.zip";
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+      setMessage(`${renderedClips.length} rendered clips downloaded as a ZIP file.`);
+    } catch (reason) {
+      setPageError(reason instanceof Error ? reason.message : "The clip bundle could not be downloaded.");
+    } finally {
+      setWorking(null);
+    }
+  };
+
   const retry = async (publication: YouTubePublication) => {
     if (!publication.job_id) return;
     setWorking(publication.id);
@@ -1051,8 +1141,9 @@ function YouTubePage({ onRefresh }: { onRefresh: () => void }) {
 
   const publicationByClip = new Map(publications.map((item) => [item.clip_id, item]));
   const renderedClips = clips.filter((clip) => clip.status === "rendered" && clip.preview_url);
+  const publishableClips = renderedClips.filter((clip) => clip.upload_metadata_status === "complete" && !publicationByClip.has(clip.id));
   const isConnected = Boolean(connection?.connected);
-  const completed = publications.filter((item) => item.status === "complete");
+  const completed = publications.filter((item) => item.status === "complete" && (!item.scheduled_at || Date.parse(item.scheduled_at) <= Date.now()));
   const totals = completed.reduce((value, item) => ({
     views: value.views + (item.analytics.views ?? 0),
     likes: value.likes + (item.analytics.likes ?? 0),
@@ -1063,7 +1154,7 @@ function YouTubePage({ onRefresh }: { onRefresh: () => void }) {
   return (
     <>
       <section className="page-heading youtube-heading">
-        <div><div className="eyebrow"><span className="eyebrow-line" /> CHANNEL CONNECTION</div><h1>YouTube<span className="heading-period">.</span></h1><p className="heading-subtitle">Upload finished clips privately and track channel results.</p></div>
+        <div><div className="eyebrow"><span className="eyebrow-line" /> CHANNEL CONNECTION</div><h1>YouTube<span className="heading-period">.</span></h1><p className="heading-subtitle">Download rendered clips or upload and schedule them on your channel.</p></div>
         <span className={`youtube-state ${isConnected ? "connected" : "disconnected"}`}><span />{loading ? "Checking" : isConnected ? "Connected" : "Not connected"}</span>
       </section>
 
@@ -1071,7 +1162,7 @@ function YouTubePage({ onRefresh }: { onRefresh: () => void }) {
       {message && <div className="youtube-feedback success"><Check size={14} /><span>{message}</span></div>}
 
       <section className="surface-card youtube-connect-card">
-        <div className="youtube-connect-copy"><div className="youtube-connect-icon"><Upload size={18} /></div><div><div className="section-overline">PRIVATE UPLOADS</div><h3>{isConnected ? "Connected to YouTube" : "Connect your channel"}</h3><p>{isConnected ? "New uploads from ClipForge are always created with private visibility." : "Link your Google account using OAuth in your system browser. ClipForge stores refresh tokens protected with Windows DPAPI."}</p>{connection?.error && <small className="youtube-error-detail">{connection.error}</small>}</div></div>
+        <div className="youtube-connect-copy"><div className="youtube-connect-icon"><Upload size={18} /></div><div><div className="section-overline">YOUTUBE PUBLISHING</div><h3>{isConnected ? "Connected to YouTube" : "Connect your channel"}</h3><p>{isConnected ? "Scheduled videos stay private until YouTube publishes them at the chosen date and time. Immediate uploads remain private." : "Link your Google account using OAuth in your system browser. ClipForge stores refresh tokens protected with Windows DPAPI."}</p>{connection?.error && <small className="youtube-error-detail">{connection.error}</small>}</div></div>
         <div className="youtube-connect-actions">
           {isConnected ? <button className="secondary-button" disabled={working !== null} onClick={() => void disconnect()}>{working === "disconnect" ? <LoaderCircle size={13} className="spin" /> : <Unlink size={13} />}Disconnect</button> : <button className="primary-button" disabled={working !== null || !connection?.configured} onClick={() => void connect()}>{working === "connect" ? <LoaderCircle size={13} className="spin" /> : <Link2 size={13} />}Connect YouTube</button>}
           {connection?.status === "pending" && <span className="youtube-pending"><LoaderCircle size={13} className="spin" />Waiting for Google…</span>}
@@ -1080,15 +1171,27 @@ function YouTubePage({ onRefresh }: { onRefresh: () => void }) {
         {connection?.configured && !isConnected && <div className="youtube-setup-note"><ShieldCheck size={14} /><span>Google consent is required for channel upload and analytics access. ClipForge requests only YouTube upload, read, and analytics scopes.</span><a href="https://developers.google.com/identity/protocols/oauth2/native-app" target="_blank" rel="noreferrer">Desktop OAuth guide <ExternalLink size={12} /></a></div>}
       </section>
 
+      <section className="surface-card youtube-schedule-card">
+        <div className="youtube-schedule-copy"><div className="section-overline">PUBLISH SCHEDULE</div><h3>Choose when videos go live</h3><p>One video defaults to 15 minutes from now. For a batch, the first video uses this time and each next video is spaced by your interval.</p></div>
+        <div className="youtube-schedule-fields">
+          <label>Start date and time<input type="datetime-local" value={scheduleAt} min={minimumScheduleAt} onChange={(event) => setScheduleAt(event.target.value)} /></label>
+          <label>Batch interval<select value={scheduleInterval} onChange={(event) => setScheduleInterval(Number(event.target.value))}><option value={15}>15 minutes</option><option value={30}>30 minutes</option><option value={60}>1 hour</option><option value={90}>1.5 hours</option><option value={120}>2 hours</option><option value={360}>6 hours</option><option value={1440}>1 day</option></select></label>
+          <button className="primary-button" disabled={!isConnected || working !== null || publishableClips.length === 0} onClick={() => void schedule(publishableClips)}>{working === "schedule" ? <LoaderCircle size={13} className="spin" /> : <CalendarClock size={13} />}Schedule all ready</button>
+        </div>
+      </section>
+
       <section className="surface-card youtube-clips-card">
-        <div className="section-header"><div><div className="section-overline">READY TO UPLOAD</div><h3>Rendered clips</h3></div><span className="youtube-subtle-count">{renderedClips.length} ready</span></div>
+        <div className="section-header"><div><div className="section-overline">READY TO UPLOAD</div><h3>Rendered clips</h3></div><div className="youtube-list-actions"><span className="youtube-subtle-count">{publishableClips.length} ready · {renderedClips.length} rendered</span><button className="secondary-button" disabled={working !== null || renderedClips.length === 0} onClick={() => void downloadAll()}>{working === "download-all" ? <LoaderCircle size={13} className="spin" /> : <Download size={13} />}Download all</button></div></div>
         {loading ? <div className="loading-state"><LoaderCircle className="spin" size={18} /> Loading rendered clips…</div> : renderedClips.length ? <div className="youtube-clips-list">{renderedClips.map((clip) => {
           const publication = publicationByClip.get(clip.id);
           const busy = publication && ["queued", "uploading", "paused"].includes(publication.status);
           return <article className="youtube-clip-row" key={clip.id}>
             <div className="youtube-clip-mark"><Film size={17} /></div>
-            <div className="youtube-clip-copy"><strong>{clip.upload_title || clip.title}</strong><span>{clip.recording_name} · {formatDuration(clip.render_metadata.duration_seconds)} · Private visibility</span>{publication?.status === "uploading" && <div className="youtube-progress"><span style={{ width: `${Math.max(0, Math.min(publication.progress, 100))}%` }} /></div>}{publication?.status === "failed" && <small className="youtube-error-detail">{publication.error_message || "Upload failed."}</small>}</div>
-            <div className="youtube-clip-action">{publication?.status === "complete" ? <a className="secondary-button" href={publication.video_url ?? undefined} target="_blank" rel="noreferrer">Uploaded privately <ExternalLink size={12} /></a> : publication?.status === "failed" ? <button className="secondary-button" disabled={working !== null || !isConnected} onClick={() => void retry(publication)}>{working === publication.id ? <LoaderCircle size={13} className="spin" /> : <RefreshCw size={13} />}Retry upload</button> : publication ? <span className={`clip-state clip-state-${publication.status}`}>{busy ? <LoaderCircle size={12} className="spin" /> : null}{publication.status.replaceAll("_", " ")}{publication.status === "uploading" ? ` ${Math.round(publication.progress)}%` : ""}</span> : <button className="primary-button" disabled={!isConnected || working !== null} onClick={() => void upload(clip)}>{working === clip.id ? <LoaderCircle size={13} className="spin" /> : <Upload size={13} />}Upload privately</button>}</div>
+            <div className="youtube-clip-copy"><strong>{clip.upload_title || clip.title}</strong><span>{clip.recording_name} · {formatDuration(clip.render_metadata.duration_seconds)} · {clip.upload_metadata_status === "complete" ? "AI metadata ready" : "Preparing metadata"}</span>{publication?.scheduled_at && <span>Scheduled for {new Date(publication.scheduled_at).toLocaleString()}</span>}{publication?.status === "uploading" && <div className="youtube-progress"><span style={{ width: `${Math.max(0, Math.min(publication.progress, 100))}%` }} /></div>}{publication?.status === "failed" && <small className="youtube-error-detail">{publication.error_message || "Upload failed."}</small>}</div>
+            <div className="youtube-clip-action">
+              <a className="secondary-button" href={`/api/clips/${encodeURIComponent(clip.id)}/download`}><Download size={13} />Download</a>
+              {publication?.status === "complete" ? <a className="secondary-button" href={publication.video_url ?? undefined} target="_blank" rel="noreferrer">{publication.scheduled_at && Date.parse(publication.scheduled_at) > Date.now() ? "Scheduled" : "Uploaded privately"}<ExternalLink size={12} /></a> : publication?.status === "failed" ? <button className="secondary-button" disabled={working !== null || !isConnected} onClick={() => void retry(publication)}>{working === publication.id ? <LoaderCircle size={13} className="spin" /> : <RefreshCw size={13} />}Retry upload</button> : publication ? <span className={`clip-state clip-state-${publication.status}`}>{busy ? <LoaderCircle size={12} className="spin" /> : null}{publication.status.replaceAll("_", " ")}{publication.status === "uploading" ? ` ${Math.round(publication.progress)}%` : ""}</span> : <><button className="secondary-button" disabled={!isConnected || working !== null || clip.upload_metadata_status !== "complete"} onClick={() => void upload(clip)}>{working === clip.id ? <LoaderCircle size={13} className="spin" /> : <Upload size={13} />}Upload privately</button><button className="primary-button" disabled={!isConnected || working !== null || clip.upload_metadata_status !== "complete"} onClick={() => void schedule([clip])}>{working === "schedule" ? <LoaderCircle size={13} className="spin" /> : <CalendarClock size={13} />}Schedule</button></>}
+            </div>
           </article>;
         })}</div> : <div className="youtube-empty"><div className="empty-icon"><Film size={18} /></div><div><strong>No rendered clips yet</strong><p>Render a candidate in Media library to make it available for a private upload.</p></div></div>}
       </section>
@@ -1097,7 +1200,7 @@ function YouTubePage({ onRefresh }: { onRefresh: () => void }) {
         <div className="section-header"><div><div className="section-overline">CHANNEL ANALYTICS</div><h3>Recent performance</h3></div><button className="text-button" disabled={!isConnected || working !== null || completed.length === 0} onClick={() => void refreshAnalytics()}>{working === "analytics" ? <LoaderCircle size={13} className="spin" /> : <RefreshCw size={13} />}Refresh analytics</button></div>
         <p className="youtube-analytics-caption">Latest available 28-day channel report; analytics can lag behind recent views.</p>
         {completed.length > 0 && <div className="youtube-metric-grid"><Metric value={totals.views} label="Views" /><Metric value={totals.likes} label="Likes" /><Metric value={totals.comments} label="Comments" /><Metric value={totals.shares} label="Shares" /></div>}
-        {completed.length > 0 ? <div className="youtube-publication-list">{completed.map((publication) => <article className="youtube-publication-row" key={publication.id}><div className="youtube-publication-icon"><BarChart3 size={15} /></div><div className="youtube-publication-copy"><strong>{publication.upload_title || publication.clip_title}</strong><span>Published privately · {publication.remote_id}</span></div><div className="youtube-publication-metrics"><span>{(publication.analytics.views ?? 0).toLocaleString()} views</span><span>{(publication.analytics.likes ?? 0).toLocaleString()} likes</span><span>{(publication.analytics.comments ?? 0).toLocaleString()} comments</span></div><span className="youtube-updated">{publication.analytics_updated_at ? `Updated ${formatDate(publication.analytics_updated_at)}` : "Not refreshed"}</span></article>)}</div> : <div className="youtube-empty"><div className="empty-icon"><BarChart3 size={18} /></div><div><strong>No YouTube analytics yet</strong><p>Private uploads will appear here after the channel has report data.</p></div></div>}
+        {completed.length > 0 ? <div className="youtube-publication-list">{completed.map((publication) => <article className="youtube-publication-row" key={publication.id}><div className="youtube-publication-icon"><BarChart3 size={15} /></div><div className="youtube-publication-copy"><strong>{publication.upload_title || publication.clip_title}</strong><span>Uploaded video · {publication.remote_id}</span></div><div className="youtube-publication-metrics"><span>{(publication.analytics.views ?? 0).toLocaleString()} views</span><span>{(publication.analytics.likes ?? 0).toLocaleString()} likes</span><span>{(publication.analytics.comments ?? 0).toLocaleString()} comments</span></div><span className="youtube-updated">{publication.analytics_updated_at ? `Updated ${formatDate(publication.analytics_updated_at)}` : "Not refreshed"}</span></article>)}</div> : <div className="youtube-empty"><div className="empty-icon"><BarChart3 size={18} /></div><div><strong>No YouTube analytics yet</strong><p>Uploaded clips will appear here when YouTube has report data.</p></div></div>}
         {analyticsUpdatedAt && <div className="youtube-analytics-foot">Last refreshed {formatDate(analyticsUpdatedAt)} · {completed.length} private uploads</div>}
       </section>
     </>

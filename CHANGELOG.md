@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — batch clips and YouTube scheduling
+
+- Added clip count selection from 1–100 and requested durations of 15, 30, or 45 seconds.
+- Automatically queue captioned vertical renders and relevant upload metadata for generated highlights.
+- Added per-clip MP4 downloads and a ZIP download for rendered clips.
+- Added individual and batch YouTube schedules with a local date/time picker, a 15-minute default for one clip, and a 90-minute default batch interval.
+- Scheduled videos upload as private and use YouTube's publish time; immediate uploads remain private.
+- Added scheduled times to publication history and exclude upcoming videos from analytics refresh.
+- Added a `scheduled_at` database migration for existing ClipForge installs.
+- Updated the user and API guides; the local importer remains the supported media source and does not fetch arbitrary YouTube links.
+
 ## Unreleased — Phase 8 integration and documentation
 
 - Added a local FastAPI service and SQLite database initialization.

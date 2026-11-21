@@ -17,14 +17,24 @@
 
 ## Roadmap status
 
-- No remaining phases in the current roadmap.
+- The original Phase 1 and Phases 3–8 are complete. Batch clip creation and scheduled YouTube publishing have since been added as a workflow extension.
+
+## Batch clip workflow extension
+
+- [x] Select 1–100 candidate clips per analysis (default 1) with a 15–45 second target duration.
+- [x] Automatically queue vertical renders with captions and generate clip metadata.
+- [x] Download a single rendered clip or a ZIP of rendered clips.
+- [x] Schedule one YouTube clip for at least 15 minutes in the future or schedule a batch at a chosen interval (default 90 minutes).
+- [x] Store scheduled publish time in publication history and exclude upcoming scheduled clips from analytics refresh.
+- [x] Add an additive database migration for existing installations.
 
 ## Scope decisions
 
 - Semi-automatic operation is the default.
 - Source video files must remain untouched.
 - Processing requires explicit source authorization confirmation at import.
-- YouTube upload integration is active and private-only; public visibility is not exposed.
+- Immediate YouTube uploads remain private; scheduled uploads use YouTube's private-until-publish workflow.
+- Media import accepts local source files and does not download arbitrary YouTube watch links.
 
 ## Phase 1 verification
 

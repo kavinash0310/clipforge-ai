@@ -174,6 +174,7 @@ def upload_private_video(
     title: str,
     description: str,
     tags: list[str],
+    publish_at: str | None = None,
     progress: Callable[[float, str], None],
     check_cancel: Callable[[], None],
     auth: YouTubeAuth = youtube_oauth,
@@ -198,9 +199,12 @@ def upload_private_video(
             return {"video_id": video_id, "url": f"https://www.youtube.com/watch?v={video_id}"}
         progress(min(90, 15 + (offset / file_size) * 75), "resuming_upload")
     else:
+        status_metadata: dict[str, str] = {"privacyStatus": "private"}
+        if publish_at:
+            status_metadata["publishAt"] = publish_at
         metadata = {
             "snippet": {"title": title.strip()[:100], "description": description[:5000], "tags": tags},
-            "status": {"privacyStatus": "private"},
+            "status": status_metadata,
         }
         query = urllib.parse.urlencode({"uploadType": "resumable", "part": "snippet,status", "notifySubscribers": "false"})
         request = urllib.request.Request(

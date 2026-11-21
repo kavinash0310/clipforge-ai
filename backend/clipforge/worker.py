@@ -11,6 +11,7 @@ from .database import (
     claim_next_job,
     complete_clip_metadata,
     complete_youtube_publication,
+    create_render_job,
     get_clip_youtube_upload_input,
     get_clip_generation_input,
     get_clip_render_input,
@@ -18,6 +19,7 @@ from .database import (
     read_settings,
     recover_interrupted_jobs,
     save_analysis_result,
+    queue_metadata_generation,
     resume_paused_jobs,
     save_recording_metadata,
     set_clip_render_status,
@@ -114,13 +116,21 @@ def _process_job(job: dict[str, Any]) -> None:
                 check_cancel=check_cancel,
             )
             check_cancel()
+            payload = json.loads(job.get("payload_json") or "{}")
             candidates = generate_highlights(
                 duration_seconds=recording["duration_seconds"],
                 energy_by_second=result["energy_by_second"],
                 scene_cuts=result["scene_cuts"],
                 transcript_segments=result["transcript"]["segments"],
+                max_candidates=max(1, min(int(payload.get("clip_count", 1)), 100)),
+                window_seconds=max(15, min(int(payload.get("clip_duration_seconds", 30)), 45)),
             )
-            save_analysis_result(recording_id, result, candidates)
+            clip_ids = save_analysis_result(recording_id, result, candidates)
+            if payload.get("auto_process", True):
+                for clip_id in clip_ids:
+                    check_cancel()
+                    create_render_job(clip_id)
+                    queue_metadata_generation(clip_id, "", "hype")
             update_job(job_id, status="complete", stage="complete", progress=100, error_message="")
         elif job["job_type"] == "render_clip":
             clip_id = job.get("clip_id")
@@ -206,6 +216,7 @@ def _process_job(job: dict[str, Any]) -> None:
                 title=title,
                 description=description,
                 tags=tags,
+                publish_at=payload.get("scheduled_at"),
                 progress=upload_progress,
                 check_cancel=_ensure_not_paused,
             )

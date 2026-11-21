@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import os
+import tempfile
+import zipfile
 from uuid import uuid4
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlsplit
@@ -13,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from starlette.background import BackgroundTask
 
 from .config import DATA_DIR, OUTPUT_DIR
 from .clip_rendering import subtitle_files
@@ -99,6 +103,48 @@ class SettingsPatch(BaseModel):
 class RecordingImport(BaseModel):
     path: str = Field(min_length=1, max_length=2048)
     authorized: bool
+
+
+class AnalyzeRecordingRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    clip_count: int = Field(default=1, ge=1, le=100)
+    clip_duration_seconds: int = Field(default=30, ge=15, le=45)
+
+
+class DownloadClipsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    clip_ids: list[str] = Field(min_length=1, max_length=500)
+
+    @field_validator("clip_ids")
+    @classmethod
+    def unique_clip_ids(cls, values: list[str]) -> list[str]:
+        if len(set(values)) != len(values):
+            raise ValueError("Clip IDs must be unique.")
+        return values
+
+
+class YouTubeScheduleRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    clip_ids: list[str] = Field(min_length=1, max_length=100)
+    start_at: datetime
+    interval_minutes: int = Field(default=90, ge=15, le=4320)
+
+    @field_validator("clip_ids")
+    @classmethod
+    def unique_clip_ids(cls, values: list[str]) -> list[str]:
+        if len(set(values)) != len(values):
+            raise ValueError("Clip IDs must be unique.")
+        return values
+
+    @field_validator("start_at")
+    @classmethod
+    def require_timezone(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("Choose a date and time with a timezone.")
+        return value
 
 
 class SubtitleSegmentEdit(BaseModel):
@@ -352,10 +398,56 @@ def queue_youtube_upload(clip_id: str) -> dict[str, Any]:
         output_path = Path(clip["rendered_path"]).resolve() if clip.get("rendered_path") else None
         if output_path is None or not output_path.is_relative_to(OUTPUT_DIR.resolve()) or not output_path.is_file():
             raise RuntimeError("A completed local render is required before uploading.")
+        if clip.get("upload_metadata_status") != "complete":
+            raise RuntimeError("Wait for generated title, description, and tags before uploading.")
         result = create_youtube_upload_job(clip_id)
         if result["status"] == "failed":
             raise HTTPException(status_code=409, detail="This clip already has a failed YouTube publication. Retry its existing job to avoid a duplicate upload.")
         return result
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.post("/api/youtube/schedule", status_code=202)
+def schedule_youtube_clips(payload: YouTubeScheduleRequest) -> dict[str, Any]:
+    start_at = payload.start_at.astimezone(UTC)
+    if start_at < datetime.now(UTC) + timedelta(minutes=15):
+        raise HTTPException(status_code=422, detail="Schedule the first video at least 15 minutes from now.")
+
+    try:
+        youtube_oauth.access_token()
+        # Validate the complete batch before queuing anything.
+        existing_publications = {
+            item["clip_id"]: item
+            for item in list_youtube_publications()
+        }
+        for clip_id in payload.clip_ids:
+            if clip_id in existing_publications:
+                raise RuntimeError("A clip can have one YouTube publication. Retry its failed upload or choose a clip without a publication record.")
+            clip = get_clip_youtube_upload_input(clip_id)
+            if clip is None:
+                raise LookupError(f"Clip {clip_id} was not found.")
+            if not clip["authorized"]:
+                raise PermissionError("The source recording has no authorization confirmation.")
+            output_path = Path(clip["rendered_path"]).resolve() if clip.get("rendered_path") else None
+            if output_path is None or not output_path.is_relative_to(OUTPUT_DIR.resolve()) or not output_path.is_file():
+                raise RuntimeError("Every clip must finish rendering before it can be scheduled.")
+            if clip.get("upload_metadata_status") != "complete" or not clip.get("upload_title"):
+                raise RuntimeError("Wait for generated title, description, and tags before scheduling.")
+
+        scheduled = []
+        for index, clip_id in enumerate(payload.clip_ids):
+            scheduled_time = start_at + timedelta(minutes=payload.interval_minutes * index)
+            scheduled_at = scheduled_time.isoformat(timespec="seconds").replace("+00:00", "Z")
+            result = create_youtube_upload_job(clip_id, scheduled_at=scheduled_at)
+            if result["status"] == "failed":
+                raise HTTPException(status_code=409, detail="A clip in this batch has a failed publication. Retry it before scheduling a new batch.")
+            scheduled.append({**result, "scheduled_at": scheduled_at})
+        return {"scheduled": scheduled, "interval_minutes": payload.interval_minutes}
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except PermissionError as error:
@@ -369,7 +461,15 @@ def refresh_youtube_analytics() -> dict[str, Any]:
     try:
         youtube_oauth.access_token()
         publications = list_youtube_publications()
-        video_ids = [item["remote_id"] for item in publications if item["status"] == "complete" and item["remote_id"]]
+        video_ids = [
+            item["remote_id"] for item in publications
+            if item["status"] == "complete"
+            and item["remote_id"]
+            and (
+                not item["scheduled_at"]
+                or datetime.fromisoformat(item["scheduled_at"].replace("Z", "+00:00")) <= datetime.now(UTC)
+            )
+        ]
         metrics = channel_analytics(video_ids)
         return {"publications": save_youtube_analytics(metrics), "refreshed_at": utc_now()}
     except (RuntimeError, YouTubeAPIError) as error:
@@ -403,10 +503,53 @@ def clip_download(clip_id: str) -> FileResponse:
     return _clip_video_response(clip_id, download=True)
 
 
-@app.post("/api/recordings/{recording_id}/analyze", status_code=202)
-def analyze_recording(recording_id: str) -> dict[str, Any]:
+@app.post("/api/clips/download-all")
+def download_all_clips(payload: DownloadClipsRequest) -> FileResponse:
+    paths: list[tuple[Path, str]] = []
+    output_root = OUTPUT_DIR.resolve()
+    for clip_id in payload.clip_ids:
+        clip = get_clip_render_input(clip_id)
+        if clip is None:
+            raise HTTPException(status_code=404, detail=f"Clip {clip_id} was not found.")
+        if not clip["authorized"]:
+            raise HTTPException(status_code=403, detail="The source recording has no authorization confirmation.")
+        if clip["status"] != "rendered":
+            raise HTTPException(status_code=409, detail="Wait for every selected clip to finish rendering before downloading the bundle.")
+        source = Path(clip["rendered_path"]).resolve() if clip.get("rendered_path") else None
+        if source is None or not source.is_relative_to(output_root) or not source.is_file():
+            raise HTTPException(status_code=404, detail="A rendered clip is unavailable in ClipForge output storage.")
+        paths.append((source, f"{clip_id}.mp4"))
+
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(prefix="clipforge-clips-", suffix=".zip", dir=OUTPUT_DIR, delete=False) as archive:
+        archive_path = Path(archive.name)
     try:
-        return create_analysis_job(recording_id)
+        with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+            for source, archive_name in paths:
+                bundle.write(source, arcname=archive_name)
+    except Exception:
+        archive_path.unlink(missing_ok=True)
+        raise
+    return FileResponse(
+        archive_path,
+        filename="clipforge-clips.zip",
+        media_type="application/zip",
+        background=BackgroundTask(archive_path.unlink, missing_ok=True),
+    )
+
+
+@app.post("/api/recordings/{recording_id}/analyze", status_code=202)
+def analyze_recording(
+    recording_id: str,
+    payload: AnalyzeRecordingRequest | None = None,
+) -> dict[str, Any]:
+    options = payload or AnalyzeRecordingRequest()
+    try:
+        return create_analysis_job(
+            recording_id,
+            clip_count=options.clip_count,
+            clip_duration_seconds=options.clip_duration_seconds,
+        )
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except PermissionError as error:

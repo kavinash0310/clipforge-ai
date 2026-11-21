@@ -198,6 +198,7 @@ def initialize_database(database_path: Path | None = None) -> None:
             ("progress", "REAL NOT NULL DEFAULT 0"),
             ("analytics_json", "TEXT NOT NULL DEFAULT '{}'"),
             ("analytics_updated_at", "TEXT"),
+            ("scheduled_at", "TEXT"),
         ):
             if name not in publication_columns:
                 connection.execute(f"ALTER TABLE publish_events ADD COLUMN {name} {declaration}")
@@ -301,7 +302,13 @@ def create_recording(recording_id: str, file_path: str, display_name: str, autho
         )
 
 
-def create_analysis_job(recording_id: str, database_path: Path | None = None) -> dict[str, Any]:
+def create_analysis_job(
+    recording_id: str,
+    database_path: Path | None = None,
+    *,
+    clip_count: int = 1,
+    clip_duration_seconds: int = 30,
+) -> dict[str, Any]:
     timestamp = utc_now()
     with database_session(database_path) as connection:
         recording = connection.execute(
@@ -323,9 +330,14 @@ def create_analysis_job(recording_id: str, database_path: Path | None = None) ->
         if recording["duration_seconds"] is None:
             raise RuntimeError("Recording inspection did not finish successfully. Retry inspection before analysis.")
         job_id = f"job-{uuid.uuid4().hex}"
+        payload = json.dumps({
+            "clip_count": max(1, min(int(clip_count), 100)),
+            "clip_duration_seconds": max(15, min(int(clip_duration_seconds), 45)),
+            "auto_process": True,
+        })
         connection.execute(
-            "INSERT INTO jobs(id, recording_id, job_type, status, progress, stage, created_at, updated_at) VALUES (?, ?, 'analyze_recording', 'queued', 0, 'queued', ?, ?)",
-            (job_id, recording_id, timestamp, timestamp),
+            "INSERT INTO jobs(id, recording_id, payload_json, job_type, status, progress, stage, created_at, updated_at) VALUES (?, ?, ?, 'analyze_recording', 'queued', 0, 'queued', ?, ?)",
+            (job_id, recording_id, payload, timestamp, timestamp),
         )
         connection.execute(
             "UPDATE recordings SET status = 'queued' WHERE id = ?",
@@ -479,7 +491,7 @@ def save_recording_metadata(recording_id: str, metadata: dict[str, Any]) -> None
         )
 
 
-def save_analysis_result(recording_id: str, result: dict[str, Any], candidates: list[dict[str, Any]], database_path: Path | None = None) -> None:
+def save_analysis_result(recording_id: str, result: dict[str, Any], candidates: list[dict[str, Any]], database_path: Path | None = None) -> list[str]:
     transcript = result["transcript"]
     timestamp = utc_now()
     profile = result["audio_profile"].copy()
@@ -518,6 +530,7 @@ def save_analysis_result(recording_id: str, result: dict[str, Any], candidates: 
             (recording_id, json.dumps(analysis, ensure_ascii=False), timestamp),
         )
         connection.execute("DELETE FROM clips WHERE recording_id = ? AND status = 'candidate'", (recording_id,))
+        candidate_ids = []
         for candidate in candidates:
             candidate_start = float(candidate["start_seconds"])
             candidate_end = float(candidate["end_seconds"])
@@ -531,10 +544,12 @@ def save_analysis_result(recording_id: str, result: dict[str, Any], candidates: 
                         "end": round(segment_end - candidate_start, 3),
                         "text": str(segment.get("text", "")).strip(),
                     })
+            candidate_id = uuid.uuid4().hex
+            candidate_ids.append(candidate_id)
             connection.execute(
                 "INSERT INTO clips(id, recording_id, file_path, title, score, start_seconds, end_seconds, reason_json, signals_json, subtitle_segments_json, status, created_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 'candidate', ?)",
                 (
-                    uuid.uuid4().hex, recording_id, candidate["title"], candidate["score"],
+                    candidate_id, recording_id, candidate["title"], candidate["score"],
                     candidate["start_seconds"], candidate["end_seconds"],
                     json.dumps(candidate["reasons"], ensure_ascii=False),
                     json.dumps(candidate["signals"], ensure_ascii=False),
@@ -542,6 +557,7 @@ def save_analysis_result(recording_id: str, result: dict[str, Any], candidates: 
                 ),
             )
         connection.execute("UPDATE recordings SET status = 'analyzed' WHERE id = ?", (recording_id,))
+    return candidate_ids
 
 
 def get_recording_analysis(recording_id: str, database_path: Path | None = None) -> dict[str, Any] | None:
@@ -619,7 +635,8 @@ def list_clips(database_path: Path | None = None) -> list[dict[str, Any]]:
                    clips.render_metadata_json, clips.rendered_at, clips.status, clips.created_at,
                    clip_metadata.title AS upload_title, clip_metadata.description AS upload_description,
                    COALESCE(clip_metadata.hashtags_json, '[]') AS upload_hashtags_json,
-                   COALESCE(clip_metadata.tags_json, '[]') AS upload_tags_json
+                   COALESCE(clip_metadata.tags_json, '[]') AS upload_tags_json,
+                   COALESCE(clip_metadata.status, 'empty') AS upload_metadata_status
             FROM clips JOIN recordings ON recordings.id = clips.recording_id
             LEFT JOIN clip_metadata ON clip_metadata.clip_id = clips.id
             ORDER BY clips.score DESC, clips.created_at DESC
@@ -675,7 +692,8 @@ def get_clip_youtube_upload_input(clip_id: str, database_path: Path | None = Non
                    COALESCE(NULLIF(clip_metadata.title, ''), clips.title, 'Gaming highlight') AS upload_title,
                    COALESCE(clip_metadata.description, '') AS upload_description,
                    COALESCE(clip_metadata.hashtags_json, '[]') AS hashtags_json,
-                   COALESCE(clip_metadata.tags_json, '[]') AS tags_json
+                   COALESCE(clip_metadata.tags_json, '[]') AS tags_json,
+                   COALESCE(clip_metadata.status, 'empty') AS upload_metadata_status
             FROM clips
             JOIN recordings ON recordings.id = clips.recording_id
             LEFT JOIN clip_metadata ON clip_metadata.clip_id = clips.id
@@ -725,7 +743,12 @@ def create_render_job(clip_id: str, database_path: Path | None = None) -> dict[s
     return {"id": job_id, "clip_id": clip_id, "status": "queued", "existing": False}
 
 
-def create_youtube_upload_job(clip_id: str, database_path: Path | None = None) -> dict[str, Any]:
+def create_youtube_upload_job(
+    clip_id: str,
+    database_path: Path | None = None,
+    *,
+    scheduled_at: str | None = None,
+) -> dict[str, Any]:
     timestamp = utc_now()
     with database_session(database_path) as connection:
         # Serialize duplicate checks across concurrent API calls.
@@ -754,14 +777,14 @@ def create_youtube_upload_job(clip_id: str, database_path: Path | None = None) -
             return {"id": event["job_id"], "event_id": event["id"], "clip_id": clip_id, "status": event["status"], "existing": True, "remote_id": event["remote_id"]}
         job_id = f"job-{uuid.uuid4().hex}"
         event_id = f"publish-{uuid.uuid4().hex}"
-        payload = json.dumps({"event_id": event_id})
+        payload = json.dumps({"event_id": event_id, "scheduled_at": scheduled_at})
         connection.execute(
             "INSERT INTO jobs(id, recording_id, clip_id, payload_json, job_type, status, progress, stage, created_at, updated_at) VALUES (?, ?, ?, ?, 'youtube_upload', 'queued', 0, 'queued', ?, ?)",
             (job_id, clip["recording_id"], clip_id, payload, timestamp, timestamp),
         )
         connection.execute(
-            "INSERT INTO publish_events(id, clip_id, job_id, platform, privacy_status, status, progress, created_at, updated_at) VALUES (?, ?, ?, 'youtube', 'private', 'queued', 0, ?, ?)",
-            (event_id, clip_id, job_id, timestamp, timestamp),
+            "INSERT INTO publish_events(id, clip_id, job_id, platform, privacy_status, status, progress, scheduled_at, created_at, updated_at) VALUES (?, ?, ?, 'youtube', 'private', 'queued', 0, ?, ?, ?)",
+            (event_id, clip_id, job_id, scheduled_at, timestamp, timestamp),
         )
     return {"id": job_id, "event_id": event_id, "clip_id": clip_id, "status": "queued", "existing": False, "remote_id": None}
 
@@ -979,7 +1002,8 @@ def list_youtube_publications(database_path: Path | None = None) -> list[dict[st
             SELECT publish_events.id, publish_events.clip_id, publish_events.job_id, publish_events.remote_id,
                    publish_events.privacy_status, publish_events.status, publish_events.progress,
                    publish_events.analytics_json, publish_events.analytics_updated_at,
-                   publish_events.error_message, publish_events.created_at, publish_events.updated_at,
+                   publish_events.error_message, publish_events.scheduled_at,
+                   publish_events.created_at, publish_events.updated_at,
                    clips.title AS clip_title, clip_metadata.title AS upload_title
             FROM publish_events
             JOIN clips ON clips.id = publish_events.clip_id

@@ -6,25 +6,33 @@ Start the backend and UI using [INSTALLATION.md](INSTALLATION.md). The Overview 
 
 The readiness card reports FFmpeg, NVIDIA GPU, faster-whisper, and Ollama availability. Settings shows detected CPU, memory, free disk, transcription model, and the app data path.
 
-## Import and analyze a recording
+## Generate captioned clips
 
-1. Open Media library and choose a local video or paste its path.
-2. Confirm that you own the recording or have permission to use it. This does not clear rights to game assets, music, or voice chat in the recording.
-3. Wait for the inspection job to finish. ClipForge reads the source path and does not overwrite or copy the original.
-4. Choose Analyze. On first use, faster-whisper downloads the selected model into app data. Audio extraction, transcription, scene analysis, and scoring then run locally.
-5. Open View results to inspect the transcript, download the SRT, and review ranked highlight candidates and their signal reasons.
+1. Open Media library and choose a local video or paste its path. YouTube watch links are not imported or downloaded.
+2. Confirm that you own the recording or are authorized to use it. ClipForge reads the source path and does not overwrite or copy the original.
+3. Choose how many clips to create (1–100, default 1) and a duration (15, 30, or 45 seconds).
+4. Wait for inspection to finish, then choose **Analyze**. On first use, faster-whisper downloads the selected model into app data. Transcription and moment ranking run locally.
+5. ClipForge queues vertical renders with captions and generates a title, description, hashtags, and relevant search tags for each result. Open **View results** to review the transcript, edit captions, and preview each render.
 
-Candidate scores rank audio peaks, speech, excitement cues, and scene changes. They are review aids; they do not guarantee that a moment is entertaining or ready to publish.
+Moment scores rank audio peaks, speech, excitement cues, and scene changes. The requested count is a maximum; a source may produce fewer clips when moments do not meet the signal threshold. Candidates shorter than the requested duration can occur when the source itself is shorter.
 
-## Edit and render a candidate
+## Download clips
 
-1. Open the recording's results and select **Edit captions & render** on a candidate.
-2. Correct caption text, adjust each caption's in/out time, add a line, or remove one. Times are relative to the candidate clip.
-3. Save caption edits. Saving is required before a new render; edited captions make a prior preview stale until the next render completes.
-4. Select **Render vertical clip**. The local queue trims the candidate, scales it to 1080 × 1920, places the full gameplay frame over a blurred background, and burns in the saved captions.
-5. Preview the rendered MP4 in the editor or download the MP4 and clip SRT. Generated files are stored under `CLIPFORGE_OUTPUT_DIR` when configured, or `%LOCALAPPDATA%\ClipForgeAI\output` by default; the original recording remains untouched.
+In the YouTube page, use **Download** beside one clip or **Download all** to save a ZIP of every rendered clip. From the clip editor, review or correct caption text and download that clip's SRT. Generated MP4 files go to `CLIPFORGE_OUTPUT_DIR` when configured, or `%LOCALAPPDATA%\ClipForgeAI\output` by default (for example `D:\Clip Forge` when that is your configured folder). The original recording remains untouched.
 
-Rendering uses FFmpeg's `libx264` encoder and subtitles/libass filter. If a render fails, the queue retains the error and offers a retry. Caption edits are locked while the render is queued, running, or paused.
+## Schedule YouTube uploads
+
+1. Configure a Google Desktop OAuth client and connect your channel from the YouTube page.
+2. Set the start date and time. The default is the next 15 minutes; choose a later date, including a date next week, when needed.
+3. Choose **Schedule** on one clip to queue it at the selected start time. Scheduled videos are uploaded as private and YouTube publishes them at the chosen time.
+4. Choose **Schedule all ready** to queue every rendered clip that has finished metadata generation. The first uses the selected time; each following upload uses the selected interval (default 90 minutes).
+5. Use **Upload privately** for an immediate private upload. Use **Retry upload** after a failed transfer to resume its existing YouTube upload.
+
+Times use your computer's local timezone. The first scheduled time must be at least 15 minutes in the future. YouTube can apply channel and API upload limits, so a batch of 100 may need to be spread across multiple days.
+
+Titles, descriptions, and tags are generated from gameplay context, using local Ollama when available and an offline template otherwise. Tags stay relevant to the clip and do not guarantee reach. Review metadata before upload. No metadata or video edit can guarantee that a platform will not make a copyright claim or issue a strike.
+
+Only rendered clips from a local source with authorization confirmation can be uploaded. The app does not download arbitrary YouTube links.
 
 ## Settings
 
@@ -34,22 +42,22 @@ Rendering uses FFmpeg's `libx264` encoder and subtitles/libass filter. If a rend
 - Pause processing to stop queued work from starting and request active jobs to pause at their next cancellation check.
 - Emergency stop blocks queued work and requests active jobs to stop at their next cancellation check.
 
-## Connect YouTube and upload privately
+## Connect YouTube
 
 1. In Google Cloud Console, create a project, enable **YouTube Data API v3** and **YouTube Analytics API**, then create an OAuth client with application type **Desktop app**. Google desktop apps use the system browser and PKCE for the loopback flow; see [Google's Desktop OAuth guide](https://developers.google.com/identity/protocols/oauth2/native-app).
 2. Download the client JSON and place it at `%LOCALAPPDATA%\ClipForgeAI\client_secrets.json`. Keep this file private and out of source control. If the OAuth consent screen is in Testing mode, add your Google account as a test user.
 3. Open ClipForge's **YouTube** page and choose **Connect YouTube**. Complete Google's account consent in the browser. Refresh tokens and resumable upload session URLs are stored in a DPAPI-protected file under app data.
-4. Render a clip, then choose **Upload privately**. ClipForge explicitly sets YouTube privacy to `private`; repeating the action reuses the existing publication record instead of starting another upload. Failed transfers can resume from the saved upload session using **Retry upload**.
+4. Choose **Schedule** on one clip or **Schedule all ready** for a batch. ClipForge uploads scheduled videos as private with YouTube's `publishAt` schedule. To keep a video private, choose **Upload privately** instead.
 5. Select **Refresh analytics** to load the latest available 28-day views, likes, comments, and shares for uploaded clips.
 
-Only rendered clips with a source authorization confirmation can be uploaded. Google account consent is required for OAuth access. Upload sessions eventually expire; if the saved session expires, ClipForge stops and asks you to check the channel before starting another publication. Google's `videos.insert` method treats privacy as public if omitted, so ClipForge always sends the explicit private setting ([API reference](https://developers.google.com/youtube/data/reference/rest/v3/videos/insert)). Analytics use the [YouTube Analytics reports API](https://developers.google.com/youtube/analytics/reference/reports/query).
+Repeated publication requests do not start a second upload for the same clip. Failed transfers can resume from the saved upload session using **Retry upload**. Google account consent is required for OAuth access. Upload sessions eventually expire; if the saved session expires, ClipForge stops and asks you to check the channel before starting another publication. Analytics use the [YouTube Analytics reports API](https://developers.google.com/youtube/analytics/reference/reports/query).
 
 ## Generate clip metadata
 
-1. Open a candidate in Media library and scroll to **Title, description & tags** in the clip editor.
-2. Enter a game or category and choose a tone, then select **Generate metadata**.
+1. Open a candidate in Media library and scroll to **Title, description & relevant tags** in the clip editor.
+2. ClipForge generates metadata automatically after analysis. You can also choose a game/category and tone, then select **Generate metadata** to refresh it.
 3. ClipForge uses the configured local Ollama model when available. If Ollama is unavailable or returns invalid output, it creates a short offline template instead. No clip media is sent to a hosted metadata service.
 4. Review and edit the title, description, hashtags, and search tags, then select **Save edits**. The metadata is stored locally with the clip.
 
-Generated copy is a draft based on the clip context; verify that it accurately describes the video. Metadata generation does not determine copyright status or guarantee protection from platform claims or strikes. The source authorization check at import remains required.
+Generated copy is a draft based on the clip context; verify that it accurately describes the video. Relevant tags can help describe content but are not a guarantee of reach or protection from platform claims or strikes.
 

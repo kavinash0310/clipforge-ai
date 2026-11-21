@@ -12,7 +12,7 @@ SQLite is created at `%LOCALAPPDATA%\ClipForgeAI\clipforge.db` on Windows. `CLIP
 - `jobs`: inspection, analysis, render, metadata-generation, or YouTube-upload type; recording and optional clip relationships; JSON payload; queued/running/paused/failed status; progress, stage, attempt count, and error text.
 - `clips`: candidate start/end, title, score, reason labels, signal breakdown, clip-relative editable subtitle segments, generated path, render metadata, and candidate/render status.
 - `clip_metadata`: game and tone context, editable title and description, tags and hashtags, generator, status, and update time.
-- `publish_events`: one YouTube publication record per clip, linked job, remote video ID, explicit privacy status, progress, status/error, cached per-video analytics, and update times. OAuth tokens and resumable session URLs are excluded from SQLite and stored in the protected local credential blob.
+- `publish_events`: one YouTube publication record per clip, linked job, remote video ID, explicit privacy status, scheduled publish time when set, progress, status/error, cached per-video analytics, and update times. OAuth tokens and resumable session URLs are excluded from SQLite and stored in the protected local credential blob.
 
 Recording, metadata, transcript, analysis, candidate, clip-metadata, job, and publication tables are populated by the current workflow. Dashboard aggregates return zeros from an empty database, not fixture values.
 
