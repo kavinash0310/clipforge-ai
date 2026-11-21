@@ -25,6 +25,7 @@ from .database import (
     create_render_job,
     create_youtube_upload_job,
     create_recording,
+    create_transcript_clip,
     get_clip_metadata,
     get_clip_render_input,
     get_clip_youtube_upload_input,
@@ -41,6 +42,7 @@ from .database import (
     queue_metadata_generation,
     save_clip_subtitles,
     save_clip_metadata,
+    set_clip_rating,
     utc_now,
     save_youtube_analytics,
     write_settings,
@@ -108,6 +110,7 @@ class RecordingImportOptions(BaseModel):
     auto_analyze: bool = False
     clip_count: int = Field(default=1, ge=1, le=100)
     clip_duration_seconds: int = Field(default=30, ge=15, le=45)
+    moment_mix: Literal["balanced", "action", "dialogue"] = "balanced"
 
 
 class RecordingImport(RecordingImportOptions):
@@ -128,6 +131,7 @@ class AnalyzeRecordingRequest(BaseModel):
 
     clip_count: int = Field(default=1, ge=1, le=100)
     clip_duration_seconds: int = Field(default=30, ge=15, le=45)
+    moment_mix: Literal["balanced", "action", "dialogue"] = "balanced"
 
 
 class DownloadClipsRequest(BaseModel):
@@ -188,6 +192,33 @@ class SubtitleEdits(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     segments: list[SubtitleSegmentEdit] = Field(max_length=300)
+
+
+class RenderOptions(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    aspect_ratio: Literal["9:16", "1:1", "4:5", "16:9"] = "9:16"
+    layout: Literal["blur", "fit", "fill"] = "blur"
+    caption_style: Literal["neon", "impact", "clean", "hormozi", "mrbeast"] = "neon"
+    watermark_text: str = Field(default="", max_length=60)
+
+    @field_validator("watermark_text")
+    @classmethod
+    def clean_watermark_text(cls, value: str) -> str:
+        return " ".join(value.split())
+
+
+class ClipRatingRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    rating: int = Field(ge=1, le=5)
+
+
+class TranscriptClipRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    start_seconds: float = Field(ge=0, le=86400)
+    clip_duration_seconds: int = Field(default=30, ge=15, le=45)
 
 
 class MetadataGenerateRequest(BaseModel):
@@ -309,10 +340,33 @@ def clips() -> list[dict[str, Any]]:
     return list_clips()
 
 
-@app.post("/api/clips/{clip_id}/render", status_code=202)
-def render_clip(clip_id: str) -> dict[str, Any]:
+@app.patch("/api/clips/{clip_id}/rating")
+def rate_clip(clip_id: str, payload: ClipRatingRequest) -> dict[str, Any]:
+    clip = set_clip_rating(clip_id, payload.rating)
+    if clip is None:
+        raise HTTPException(status_code=404, detail="Clip candidate not found.")
+    return clip
+
+
+@app.post("/api/recordings/{recording_id}/clips/from-transcript", status_code=201)
+def clip_from_transcript(recording_id: str, payload: TranscriptClipRequest) -> dict[str, Any]:
     try:
-        return create_render_job(clip_id)
+        clip = create_transcript_clip(recording_id, payload.start_seconds, payload.clip_duration_seconds)
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    if clip is None:
+        raise HTTPException(status_code=404, detail="Recording not found.")
+    return clip
+
+
+@app.post("/api/clips/{clip_id}/render", status_code=202)
+def render_clip(clip_id: str, payload: RenderOptions = RenderOptions()) -> dict[str, Any]:
+    try:
+        return create_render_job(clip_id, render_options=payload.model_dump())
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except PermissionError as error:
@@ -567,6 +621,7 @@ def analyze_recording(
             recording_id,
             clip_count=options.clip_count,
             clip_duration_seconds=options.clip_duration_seconds,
+            moment_mix=options.moment_mix,
         )
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
@@ -586,6 +641,7 @@ def _register_recording(path: Path, display_name: str, options: RecordingImportO
         auto_analysis = {
             "clip_count": options.clip_count,
             "clip_duration_seconds": options.clip_duration_seconds,
+            "moment_mix": options.moment_mix,
         }
     try:
         create_recording(recording_id, normalized_path, display_name, True, auto_analysis=auto_analysis)
@@ -617,6 +673,7 @@ async def upload_recording(
     auto_analyze: bool = Query(default=True),
     clip_count: int = Query(default=1, ge=1, le=100),
     clip_duration_seconds: int = Query(default=30, ge=15, le=45),
+    moment_mix: Literal["balanced", "action", "dialogue"] = Query(default="balanced"),
 ) -> dict[str, Any]:
     if not authorized:
         raise HTTPException(status_code=400, detail="Confirm that you own or are authorized to use this recording before importing it.")
@@ -625,6 +682,7 @@ async def upload_recording(
         auto_analyze=auto_analyze,
         clip_count=clip_count,
         clip_duration_seconds=clip_duration_seconds,
+        moment_mix=moment_mix,
     )
     try:
         path, display_name = await save_uploaded_video(filename, request.headers.get("content-type"), request.stream())

@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — Neon-inspired clip studio
+
+- Reworked the studio palette to orchid, hot pink, and cyan with brighter accents and matching editor surfaces.
+- Added a searchable My clips library with ready/in-progress filters, individual/ZIP downloads, direct editor links, and saved one-to-five star ratings.
+- Added Balanced, Action, and Dialogue moment scoring mixes to upload, local-path, direct-file-link, and re-analysis flows.
+- Added transcript search and one-click passage-to-clip creation with the matching caption lines.
+- Added render controls for Shorts, square, portrait, and landscape output; blurred, fit, or crop layouts; five caption styles; and optional creator watermark.
+- Added SRT and WebVTT caption import to the clip editor and isolated per-clip ASS files for concurrent renders.
+- Documented new editor controls and API routes.
+
 ## Unreleased — batch clips and YouTube scheduling
 
 - Added clip count selection from 1–100 and requested durations of 15, 30, or 45 seconds.

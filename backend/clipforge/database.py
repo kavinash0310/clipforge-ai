@@ -184,6 +184,7 @@ def initialize_database(database_path: Path | None = None) -> None:
             ("subtitle_segments_json", "TEXT NOT NULL DEFAULT '[]'"),
             ("render_metadata_json", "TEXT NOT NULL DEFAULT '{}'"),
             ("rendered_at", "TEXT"),
+            ("user_rating", "INTEGER"),
         ):
             if name not in clip_columns:
                 connection.execute(f"ALTER TABLE clips ADD COLUMN {name} {declaration}")
@@ -290,7 +291,7 @@ def create_recording(
     authorized: bool,
     database_path: Path | None = None,
     *,
-    auto_analysis: dict[str, int] | None = None,
+    auto_analysis: dict[str, Any] | None = None,
 ) -> None:
     timestamp = utc_now()
     inspect_payload = json.dumps({"auto_analysis": auto_analysis}) if auto_analysis else None
@@ -317,6 +318,7 @@ def create_analysis_job(
     *,
     clip_count: int = 1,
     clip_duration_seconds: int = 30,
+    moment_mix: str = "balanced",
 ) -> dict[str, Any]:
     timestamp = utc_now()
     with database_session(database_path) as connection:
@@ -342,6 +344,7 @@ def create_analysis_job(
         payload = json.dumps({
             "clip_count": max(1, min(int(clip_count), 100)),
             "clip_duration_seconds": max(15, min(int(clip_duration_seconds), 45)),
+            "moment_mix": moment_mix if moment_mix in {"balanced", "action", "dialogue"} else "balanced",
             "auto_process": True,
         })
         connection.execute(
@@ -583,7 +586,7 @@ def get_recording_analysis(recording_id: str, database_path: Path | None = None)
             (recording_id,),
         ).fetchone()
         clips = connection.execute(
-            "SELECT id, title, score, start_seconds, end_seconds, reason_json, signals_json, subtitle_segments_json, render_metadata_json, rendered_at, status, created_at FROM clips WHERE recording_id = ? ORDER BY score DESC, start_seconds",
+            "SELECT id, title, score, user_rating, start_seconds, end_seconds, reason_json, signals_json, subtitle_segments_json, render_metadata_json, rendered_at, status, created_at FROM clips WHERE recording_id = ? ORDER BY score DESC, start_seconds",
             (recording_id,),
         ).fetchall()
     if transcript is None:
@@ -639,7 +642,7 @@ def list_clips(database_path: Path | None = None) -> list[dict[str, Any]]:
         rows = connection.execute(
             """
             SELECT clips.id, clips.recording_id, recordings.display_name AS recording_name,
-                   clips.file_path, clips.title, clips.score, clips.start_seconds, clips.end_seconds,
+                   clips.file_path, clips.title, clips.score, clips.user_rating, clips.start_seconds, clips.end_seconds,
                    clips.reason_json, clips.signals_json, clips.subtitle_segments_json,
                    clips.render_metadata_json, clips.rendered_at, clips.status, clips.created_at,
                    clip_metadata.title AS upload_title, clip_metadata.description AS upload_description,
@@ -659,7 +662,7 @@ def get_clip(clip_id: str, database_path: Path | None = None) -> dict[str, Any] 
         row = connection.execute(
             """
             SELECT clips.id, clips.recording_id, recordings.display_name AS recording_name,
-                   clips.file_path, clips.title, clips.score, clips.start_seconds, clips.end_seconds,
+                   clips.file_path, clips.title, clips.score, clips.user_rating, clips.start_seconds, clips.end_seconds,
                    clips.reason_json, clips.signals_json, clips.subtitle_segments_json,
                    clips.render_metadata_json, clips.rendered_at, clips.status, clips.created_at
             FROM clips JOIN recordings ON recordings.id = clips.recording_id
@@ -668,6 +671,67 @@ def get_clip(clip_id: str, database_path: Path | None = None) -> dict[str, Any] 
             (clip_id,),
         ).fetchone()
     return _clip_from_row(row) if row else None
+
+
+def set_clip_rating(clip_id: str, rating: int, database_path: Path | None = None) -> dict[str, Any] | None:
+    if rating < 1 or rating > 5:
+        raise ValueError("Rating must be between 1 and 5.")
+    with database_session(database_path) as connection:
+        cursor = connection.execute("UPDATE clips SET user_rating = ? WHERE id = ?", (rating, clip_id))
+        if cursor.rowcount == 0:
+            return None
+    return get_clip(clip_id, database_path)
+
+
+def create_transcript_clip(
+    recording_id: str,
+    timestamp_seconds: float,
+    clip_duration_seconds: int,
+    database_path: Path | None = None,
+) -> dict[str, Any] | None:
+    timestamp = utc_now()
+    with database_session(database_path) as connection:
+        recording = connection.execute(
+            "SELECT duration_seconds, authorized FROM recordings WHERE id = ?",
+            (recording_id,),
+        ).fetchone()
+        transcript = connection.execute(
+            "SELECT segments_json FROM recording_transcripts WHERE recording_id = ?",
+            (recording_id,),
+        ).fetchone()
+        if recording is None:
+            return None
+        if not recording["authorized"]:
+            raise PermissionError("This recording has no authorization confirmation.")
+        duration = float(recording["duration_seconds"] or 0)
+        if transcript is None:
+            raise RuntimeError("Transcribe the recording before creating a clip from its transcript.")
+        if duration < 15:
+            raise ValueError("The recording is shorter than the minimum 15-second clip length.")
+        if timestamp_seconds < 0 or timestamp_seconds > duration:
+            raise ValueError("The selected transcript timestamp is outside the recording.")
+        clip_length = max(15, min(int(clip_duration_seconds), 45, int(duration)))
+        start = min(max(0.0, timestamp_seconds - min(6.0, clip_length * 0.2)), duration - clip_length)
+        end = start + clip_length
+        transcript_segments = json.loads(transcript["segments_json"])
+        subtitles = []
+        context = []
+        for segment in transcript_segments:
+            segment_start = max(start, float(segment["start"]))
+            segment_end = min(end, float(segment["end"]))
+            if segment_end <= segment_start:
+                continue
+            text = str(segment.get("text", "")).strip()
+            if text:
+                subtitles.append({"start": round(segment_start - start, 3), "end": round(segment_end - start, 3), "text": text})
+                context.append(text)
+        title = " ".join(" ".join(context).split())[:96].strip(" ,.!?") or f"Transcript passage at {int(start // 60):02d}:{int(start % 60):02d}"
+        clip_id = uuid.uuid4().hex
+        connection.execute(
+            "INSERT INTO clips(id, recording_id, file_path, title, score, start_seconds, end_seconds, reason_json, signals_json, subtitle_segments_json, status, created_at) VALUES (?, ?, NULL, ?, 50, ?, ?, ?, '{}', ?, 'candidate', ?)",
+            (clip_id, recording_id, title, start, end, json.dumps(["Selected from transcript"]), json.dumps(subtitles, ensure_ascii=False), timestamp),
+        )
+    return get_clip(clip_id, database_path)
 
 
 def get_clip_render_input(clip_id: str, database_path: Path | None = None) -> dict[str, Any] | None:
@@ -719,12 +783,18 @@ def get_clip_youtube_upload_input(clip_id: str, database_path: Path | None = Non
     return value
 
 
-def create_render_job(clip_id: str, database_path: Path | None = None) -> dict[str, Any]:
+def create_render_job(
+    clip_id: str,
+    database_path: Path | None = None,
+    *,
+    render_options: dict[str, str] | None = None,
+) -> dict[str, Any]:
     timestamp = utc_now()
+    options = render_options or {"aspect_ratio": "9:16", "layout": "blur", "caption_style": "neon", "watermark_text": ""}
     with database_session(database_path) as connection:
         clip = connection.execute(
             """
-            SELECT clips.status, clips.file_path, clips.recording_id, clips.subtitle_segments_json,
+            SELECT clips.status, clips.file_path, clips.recording_id, clips.subtitle_segments_json, clips.render_metadata_json,
                    recordings.authorized
             FROM clips JOIN recordings ON recordings.id = clips.recording_id
             WHERE clips.id = ?
@@ -741,12 +811,14 @@ def create_render_job(clip_id: str, database_path: Path | None = None) -> dict[s
         ).fetchone()
         if active is not None:
             return {"id": active["id"], "clip_id": clip_id, "status": active["status"], "existing": True}
-        if clip["status"] == "rendered" and clip["file_path"] and Path(clip["file_path"]).is_file():
+        rendered_metadata = json.loads(clip["render_metadata_json"] or "{}")
+        current_options = rendered_metadata.get("settings") or {"aspect_ratio": "9:16", "layout": "blur", "caption_style": "neon", "watermark_text": ""}
+        if clip["status"] == "rendered" and clip["file_path"] and Path(clip["file_path"]).is_file() and current_options == options:
             return {"id": None, "clip_id": clip_id, "status": "rendered", "existing": True}
         job_id = f"job-{uuid.uuid4().hex}"
         connection.execute(
-            "INSERT INTO jobs(id, recording_id, clip_id, job_type, status, progress, stage, created_at, updated_at) VALUES (?, ?, ?, 'render_clip', 'queued', 0, 'queued', ?, ?)",
-            (job_id, clip["recording_id"], clip_id, timestamp, timestamp),
+            "INSERT INTO jobs(id, recording_id, clip_id, payload_json, job_type, status, progress, stage, created_at, updated_at) VALUES (?, ?, ?, ?, 'render_clip', 'queued', 0, 'queued', ?, ?)",
+            (job_id, clip["recording_id"], clip_id, json.dumps(options), timestamp, timestamp),
         )
         connection.execute("UPDATE clips SET status = 'queued' WHERE id = ?", (clip_id,))
     return {"id": job_id, "clip_id": clip_id, "status": "queued", "existing": False}

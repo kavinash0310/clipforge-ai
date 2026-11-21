@@ -22,15 +22,15 @@ Returns source paths, metadata, state, authorization confirmation, and transcrip
 
 ## `POST /api/recordings`
 
-Accepts a local `path`, `authorized: true`, and optional `auto_analyze`, `clip_count` (1–100), and `clip_duration_seconds` (15–45). When `auto_analyze` is true, inspection queues analysis automatically when the file is ready. The service verifies that the file exists and uses a supported video extension. Duplicate paths return `409`; absent authorization returns `400`.
+Accepts a local `path`, `authorized: true`, and optional `auto_analyze`, `clip_count` (1–100), `clip_duration_seconds` (15–45), and `moment_mix` (`balanced`, `action`, or `dialogue`). When `auto_analyze` is true, inspection queues analysis automatically when the file is ready. The service verifies that the file exists and uses a supported video extension. Duplicate paths return `409`; absent authorization returns `400`.
 
 ## `POST /api/recordings/upload`
 
-Accepts the raw video file as the request body and query parameters `filename`, `authorized=true`, `auto_analyze=true`, `clip_count=1`, and `clip_duration_seconds=30`. Supported files are MP4, M4V, MKV, MOV, AVI, MPEG, and WebM, up to 20 GB. The uploaded source is stored in `CLIPFORGE_OUTPUT_DIR\sources` (or the default output directory) before inspection.
+Accepts the raw video file as the request body and query parameters `filename`, `authorized=true`, `auto_analyze=true`, `clip_count=1`, `clip_duration_seconds=30`, and `moment_mix=balanced`. Supported files are MP4, M4V, MKV, MOV, AVI, MPEG, and WebM, up to 20 GB. The uploaded source is stored in `CLIPFORGE_OUTPUT_DIR\sources` (or the default output directory) before inspection.
 
 ## `POST /api/recordings/import-link`
 
-Accepts `{"url":"https://host/video.mp4","authorized":true,"auto_analyze":true,"clip_count":1,"clip_duration_seconds":30}`. The link must be public HTTP(S) and return a direct video file; local/private network addresses, webpages, and playlists are rejected. Redirects are checked before each request and the source is capped at 20 GB. Platform watch pages such as YouTube, Twitch, and Kick are not direct media-file URLs.
+Accepts `{"url":"https://host/video.mp4","authorized":true,"auto_analyze":true,"clip_count":1,"clip_duration_seconds":30,"moment_mix":"balanced"}`. The link must be public HTTP(S) and return a direct video file; local/private network addresses, webpages, and playlists are rejected. Redirects are checked before each request and the source is capped at 20 GB. Platform watch pages such as YouTube, Twitch, and Kick are not direct media-file URLs.
 
 ## `POST /api/recordings/browse`
 
@@ -38,11 +38,15 @@ Opens the native Windows video picker and returns the selected path or `null` wh
 
 ## `POST /api/recordings/{recording_id}/analyze`
 
-Accepts `{"clip_count":1,"clip_duration_seconds":30}`; count is 1–100 (default 1) and duration is 15–45 seconds (default 30). Queues local transcription and highlight analysis for an inspected, authorized recording, then automatically queues a vertical render and metadata generation for each returned candidate. Repeated requests return the existing active analysis job. The requested count is a maximum because low-signal sources may yield fewer candidates.
+Accepts `{"clip_count":1,"clip_duration_seconds":30,"moment_mix":"balanced"}`; count is 1–100 (default 1), duration is 15–45 seconds (default 30), and moment mix is `balanced`, `action`, or `dialogue`. Queues local transcription and highlight analysis for an inspected, authorized recording, then automatically queues a vertical render and metadata generation for each returned candidate. Repeated requests return the existing active analysis job. The requested count is a maximum because low-signal sources may yield fewer candidates.
 
 ## `GET /api/recordings/{recording_id}/analysis`
 
 Returns transcript segments, analysis summary, candidate scores, timestamps, reason labels, signal breakdowns, per-candidate editable captions, and render status/metadata.
+
+## `POST /api/recordings/{recording_id}/clips/from-transcript`
+
+Accepts `{"start_seconds":72.4,"clip_duration_seconds":30}` and creates a 15–45 second candidate centered near the chosen transcript timestamp, including the matching caption lines. The recording must have a transcript and authorization confirmation.
 
 ## `GET /api/recordings/{recording_id}/subtitles`
 
@@ -58,7 +62,11 @@ Saves clip-relative caption edits. `segments` is an array of `{ "start": 0.0, "e
 
 ## `POST /api/clips/{clip_id}/render`
 
-Queues an idempotent local `render_clip` job for an authorized candidate. FFmpeg trims the source timestamps, creates a 1080 × 1920 H.264 MP4 with a blurred background behind the full gameplay frame, and burns in the saved captions. The source recording is read-only.
+Accepts optional render settings: `aspect_ratio` (`9:16`, `1:1`, `4:5`, `16:9`), `layout` (`blur`, `fit`, `fill`), `caption_style` (`neon`, `impact`, `clean`, `hormozi`, `mrbeast`), and `watermark_text` (up to 60 characters). Queues a local render for an authorized candidate. FFmpeg trims the source timestamps and burns in the saved captions. Re-rendering uses the selected settings; the source recording is read-only.
+
+## `PATCH /api/clips/{clip_id}/rating`
+
+Accepts `{"rating":4}` to save a one-to-five star rating in the local clip library.
 
 ## `GET /api/clips/{clip_id}/preview` and `GET /api/clips/{clip_id}/download`
 

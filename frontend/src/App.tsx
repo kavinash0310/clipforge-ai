@@ -24,16 +24,18 @@ import {
   Pause,
   Play,
   RefreshCw,
+  Search,
   Settings2,
   ShieldCheck,
   Sparkles,
+  Star,
   SquareStop,
   Upload,
   Unlink,
   Zap,
 } from "lucide-react";
 
-type Page = "overview" | "media" | "youtube" | "settings";
+type Page = "overview" | "media" | "clips" | "youtube" | "settings";
 type Job = {
   id: string;
   job_type: string;
@@ -110,6 +112,13 @@ type QueueJob = Job & {
   clip_id?: string | null;
 };
 type SubtitleSegment = { start: number; end: number; text: string };
+type RenderOptions = {
+  aspect_ratio: "9:16" | "1:1" | "4:5" | "16:9";
+  layout: "blur" | "fit" | "fill";
+  caption_style: "neon" | "impact" | "clean" | "hormozi" | "mrbeast";
+  watermark_text: string;
+};
+const defaultRenderOptions: RenderOptions = { aspect_ratio: "9:16", layout: "blur", caption_style: "neon", watermark_text: "" };
 type MetadataTone = "hype" | "funny" | "clean" | "competitive";
 type ClipMetadataForm = {
   game_name: string;
@@ -134,6 +143,7 @@ type Clip = {
   recording_name: string;
   title: string;
   score: number;
+  user_rating: number | null;
   start_seconds: number;
   end_seconds: number;
   reasons: string[];
@@ -141,7 +151,7 @@ type Clip = {
   subtitles: SubtitleSegment[];
   status: string;
   preview_url: string | null;
-  render_metadata: { duration_seconds?: number; width?: number; height?: number; codec?: string };
+  render_metadata: { duration_seconds?: number; width?: number; height?: number; codec?: string; settings?: RenderOptions };
   rendered_at: string | null;
   upload_title: string;
   upload_description: string;
@@ -209,6 +219,7 @@ type RecordingAnalysis = {
 
 const navItems = [
   { label: "Create clips", icon: Clapperboard, page: "media" as const },
+  { label: "My clips", icon: Film, page: "clips" as const },
   { label: "YouTube", icon: Upload, page: "youtube" as const },
   { label: "Overview", icon: Layers3, page: "overview" as const },
   { label: "Settings", icon: Settings2, page: "settings" as const },
@@ -267,6 +278,7 @@ function greeting() {
 
 function App() {
   const [page, setPage] = useState<Page>("media");
+  const [requestedClipId, setRequestedClipId] = useState<string | null>(null);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -375,6 +387,7 @@ function App() {
             <button key={target} className={`nav-item ${page === target ? "active" : ""}`} onClick={() => setPage(target)}>
               <Icon size={17} strokeWidth={1.9} /><span>{label}</span>
               {target === "media" && activeJobs > 0 && <span className="nav-count">{activeJobs}</span>}
+              {target === "clips" && (overview?.clips_total ?? 0) > 0 && <span className="nav-count">{overview?.clips_total}</span>}
             </button>
           ))}
         </nav>
@@ -401,7 +414,7 @@ function App() {
 
       <main className="main-area">
         <header className="topbar">
-              <div className="breadcrumb"><span>CLIPFORGE</span><span className="crumb-divider">/</span><span>{page === "overview" ? "OVERVIEW" : page === "media" ? "CREATE CLIPS" : page === "youtube" ? "YOUTUBE" : "SETTINGS"}</span></div>
+              <div className="breadcrumb"><span>CLIPFORGE</span><span className="crumb-divider">/</span><span>{page === "overview" ? "OVERVIEW" : page === "media" ? "CREATE CLIPS" : page === "clips" ? "MY CLIPS" : page === "youtube" ? "YOUTUBE" : "SETTINGS"}</span></div>
           <div className="topbar-actions">
             <div className={`system-pill ${systemReady ? "ready" : "attention"}`}>
               <span className="pill-dot" />{systemReady ? "Studio ready" : "Setup needs attention"}
@@ -491,7 +504,9 @@ function App() {
               </section>
             </>
           ) : page === "media" ? (
-            <MediaPage onRefresh={() => void loadDashboard(true)} />
+            <MediaPage onRefresh={() => void loadDashboard(true)} focusClipId={requestedClipId} onFocusHandled={() => setRequestedClipId(null)} />
+          ) : page === "clips" ? (
+            <MyClipsPage onNavigate={setPage} onEditClip={(clipId) => { setRequestedClipId(clipId); setPage("media"); }} />
           ) : page === "youtube" ? (
             <YouTubePage onRefresh={() => void loadDashboard(true)} />
           ) : (
@@ -544,7 +559,7 @@ function ActivityRow({ job }: { job: Job }) {
   );
 }
 
-function MediaPage({ onRefresh }: { onRefresh: () => void }) {
+function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () => void; focusClipId: string | null; onFocusHandled: () => void }) {
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [jobs, setJobs] = useState<QueueJob[]>([]);
   const [clips, setClips] = useState<Clip[]>([]);
@@ -555,20 +570,24 @@ function MediaPage({ onRefresh }: { onRefresh: () => void }) {
   const [authorized, setAuthorized] = useState(false);
   const [clipCount, setClipCount] = useState(1);
   const [clipDuration, setClipDuration] = useState(30);
+  const [momentMix, setMomentMix] = useState<"balanced" | "action" | "dialogue">("balanced");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<RecordingAnalysis | null>(null);
+  const [transcriptQuery, setTranscriptQuery] = useState("");
   const [selectedAnalysisId, setSelectedAnalysisId] = useState<string | null>(null);
   const [analyzingId, setAnalyzingId] = useState<string | null>(null);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const [captionDraft, setCaptionDraft] = useState<SubtitleSegment[]>([]);
+  const [renderOptions, setRenderOptions] = useState<RenderOptions>(defaultRenderOptions);
   const [clipBusy, setClipBusy] = useState(false);
   const [metadata, setMetadata] = useState<ClipMetadata | null>(null);
   const [metadataForm, setMetadataForm] = useState<ClipMetadataForm>({ game_name: "", tone: "hype", title: "", description: "", hashtags: [], tags: [] });
   const [metadataBusy, setMetadataBusy] = useState(false);
   const metadataDirty = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const captionFileRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -638,7 +657,7 @@ function MediaPage({ onRefresh }: { onRefresh: () => void }) {
     setMessage(null);
     setPageError(null);
     try {
-      const clipOptions = { authorized, auto_analyze: true, clip_count: clipCount, clip_duration_seconds: clipDuration };
+      const clipOptions = { authorized, auto_analyze: true, clip_count: clipCount, clip_duration_seconds: clipDuration, moment_mix: momentMix };
       let result: { recording_id: string; job_id: string; display_name: string };
       if (sourceMode === "upload") {
         if (!selectedFile) throw new Error("Choose a video file first.");
@@ -648,6 +667,7 @@ function MediaPage({ onRefresh }: { onRefresh: () => void }) {
           auto_analyze: "true",
           clip_count: String(clipCount),
           clip_duration_seconds: String(clipDuration),
+          moment_mix: momentMix,
         });
         result = await api<{ recording_id: string; job_id: string; display_name: string }>(`/api/recordings/upload?${query.toString()}`, {
           method: "POST",
@@ -701,9 +721,9 @@ function MediaPage({ onRefresh }: { onRefresh: () => void }) {
     try {
       const result = await api<{ id: string; existing: boolean }>(`/api/recordings/${encodeURIComponent(recording.id)}/analyze`, {
         method: "POST",
-        body: JSON.stringify({ clip_count: clipCount, clip_duration_seconds: clipDuration }),
+        body: JSON.stringify({ clip_count: clipCount, clip_duration_seconds: clipDuration, moment_mix: momentMix }),
       });
-      setMessage(result.existing ? "This recording is already in the analysis queue." : `ClipForge is looking for up to ${clipCount} highlights from ${recording.display_name}. It will caption, render, and draft metadata for each result.`);
+      setMessage(result.existing ? "This recording is already in the analysis queue." : `ClipForge is looking for up to ${clipCount} ${momentMix} moments from ${recording.display_name}. It will caption, render, and draft metadata for each result.`);
       setSelectedAnalysisId(null);
       setAnalysis(null);
       await refresh();
@@ -747,13 +767,35 @@ function MediaPage({ onRefresh }: { onRefresh: () => void }) {
   const captionDraftChanged = selectedClip
     ? JSON.stringify(captionDraft) !== JSON.stringify(selectedClip.subtitles)
     : false;
+  const renderSettingsChanged = Boolean(selectedClip && JSON.stringify(selectedClip.render_metadata.settings ?? defaultRenderOptions) !== JSON.stringify(renderOptions));
 
   const editClip = (clip: Clip | RecordingAnalysis["candidates"][number]) => {
     setSelectedClipId(clip.id);
     setCaptionDraft(clip.subtitles.map((segment) => ({ ...segment })));
+    setRenderOptions({ ...defaultRenderOptions, ...clip.render_metadata.settings });
     metadataDirty.current = false;
     setPageError(null);
   };
+
+  useEffect(() => {
+    if (!focusClipId) return;
+    const clip = clips.find((candidate) => candidate.id === focusClipId);
+    if (!clip) return;
+    if (analysis?.recording_id === clip.recording_id) {
+      editClip(clip);
+      onFocusHandled();
+      window.setTimeout(() => document.getElementById("clip-editor")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+      return;
+    }
+    if (selectedAnalysisId !== clip.recording_id) {
+      setSelectedAnalysisId(clip.recording_id);
+      setAnalysis(null);
+      setPageError(null);
+      void api<RecordingAnalysis>(`/api/recordings/${encodeURIComponent(clip.recording_id)}/analysis`)
+        .then(setAnalysis)
+        .catch((reason) => setPageError(reason instanceof Error ? reason.message : "Clip analysis could not be loaded."));
+    }
+  }, [focusClipId, clips, analysis, selectedAnalysisId]);
 
   const updateMetadata = (patch: Partial<ClipMetadataForm>) => {
     metadataDirty.current = true;
@@ -839,6 +881,42 @@ function MediaPage({ onRefresh }: { onRefresh: () => void }) {
     }
   };
 
+  const importCaptionFile = async (file: File | undefined) => {
+    if (!file || !selectedClip) return;
+    setPageError(null);
+    try {
+      const source = (await file.text()).replace(/\r/g, "").replace(/^\uFEFF/, "");
+      const parseClock = (value: string) => {
+        const parts = value.trim().split(/[,.]/)[0].split(":").map(Number);
+        const fraction = Number(`0.${value.trim().split(/[,.]/)[1] ?? "0"}`);
+        if (parts.some((part) => !Number.isFinite(part)) || !Number.isFinite(fraction) || parts.length < 2 || parts.length > 3) return NaN;
+        const seconds = parts.length === 3 ? parts[0] * 3600 + parts[1] * 60 + parts[2] : parts[0] * 60 + parts[1];
+        return seconds + fraction;
+      };
+      const segments: SubtitleSegment[] = source.split(/\n\s*\n/).flatMap((block) => {
+        const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
+        const timingIndex = lines.findIndex((line) => line.includes("-->"));
+        if (timingIndex < 0) return [];
+        const [inTime, outTime] = lines[timingIndex].split("-->");
+        const start = parseClock(inTime);
+        const end = parseClock(outTime);
+        const text = lines.slice(timingIndex + 1).join(" ").replace(/<[^>]*>/g, "").trim();
+        return Number.isFinite(start) && Number.isFinite(end) && text ? [{ start, end, text }] : [];
+      });
+      const clipDurationSeconds = selectedClip.end_seconds - selectedClip.start_seconds;
+      if (!segments.length) throw new Error("No readable SRT or WebVTT caption cues were found.");
+      if (segments.length > 300 || segments.some((segment) => segment.start < 0 || segment.end <= segment.start || segment.end > clipDurationSeconds + 0.05)) {
+        throw new Error("Caption times must fit inside this clip. Export captions trimmed to this clip's duration.");
+      }
+      setCaptionDraft(segments);
+      setMessage(`${segments.length} caption lines imported. Save captions to apply them to this clip.`);
+    } catch (reason) {
+      setPageError(reason instanceof Error ? reason.message : "The caption file could not be imported.");
+    } finally {
+      if (captionFileRef.current) captionFileRef.current.value = "";
+    }
+  };
+
   const renderClip = async () => {
     if (!selectedClip) return;
     setClipBusy(true);
@@ -846,9 +924,9 @@ function MediaPage({ onRefresh }: { onRefresh: () => void }) {
     try {
       const job = await api<{ id: string | null; status: string; existing: boolean }>(`/api/clips/${encodeURIComponent(selectedClip.id)}/render`, {
         method: "POST",
-        body: "{}",
+        body: JSON.stringify(renderOptions),
       });
-      setMessage(job.status === "rendered" ? "This candidate already has a rendered preview." : "Vertical render queued. The preview will appear when FFmpeg finishes.");
+      setMessage(job.status === "rendered" ? "This clip already uses those render settings." : "Render queued. Your chosen frame, layout, and caption style will be applied.");
       await refresh();
       onRefresh();
     } catch (reason) {
@@ -857,6 +935,31 @@ function MediaPage({ onRefresh }: { onRefresh: () => void }) {
       setClipBusy(false);
     }
   };
+
+  const createClipFromTranscript = async (startSeconds: number) => {
+    if (!selectedAnalysisId) return;
+    setClipBusy(true);
+    setPageError(null);
+    try {
+      const clip = await api<Clip>(`/api/recordings/${encodeURIComponent(selectedAnalysisId)}/clips/from-transcript`, {
+        method: "POST",
+        body: JSON.stringify({ start_seconds: startSeconds, clip_duration_seconds: clipDuration }),
+      });
+      setSelectedClipId(clip.id);
+      setCaptionDraft(clip.subtitles.map((segment) => ({ ...segment })));
+      setRenderOptions(defaultRenderOptions);
+      await refresh();
+      setMessage("Transcript passage added to your clip editor. Adjust captions or styling, then render it.");
+      window.setTimeout(() => document.getElementById("clip-editor")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+    } catch (reason) {
+      setPageError(reason instanceof Error ? reason.message : "A clip could not be created from this passage.");
+    } finally {
+      setClipBusy(false);
+    }
+  };
+
+  const visibleTranscriptSegments = (analysis?.transcript?.segments ?? []).map((segment, index) => ({ segment, index }))
+    .filter(({ segment }) => !transcriptQuery.trim() || segment.text.toLowerCase().includes(transcriptQuery.trim().toLowerCase()));
 
   return (
     <>
@@ -909,6 +1012,7 @@ function MediaPage({ onRefresh }: { onRefresh: () => void }) {
         <div className="clip-plan-fields">
           <label>Number of clips<input type="number" min={1} max={100} value={clipCount} onChange={(event) => setClipCount(Math.max(1, Math.min(100, Number(event.target.value) || 1)))} /></label>
           <label>Clip duration<select value={clipDuration} onChange={(event) => setClipDuration(Number(event.target.value))}><option value={15}>15 seconds</option><option value={30}>30 seconds</option><option value={45}>45 seconds</option></select></label>
+          <label>Moment mix<select value={momentMix} onChange={(event) => setMomentMix(event.target.value as typeof momentMix)}><option value="balanced">Balanced</option><option value="action">Action</option><option value="dialogue">Dialogue</option></select></label>
         </div>
       </section>
 
@@ -966,7 +1070,7 @@ function MediaPage({ onRefresh }: { onRefresh: () => void }) {
             </article>;
           })}</div> : <div className="no-candidates"><div className="empty-icon"><Sparkles size={18} /></div><div><strong>No clear highlight candidates found</strong><p>The recording was transcribed, but its audio, transcript, and scene signals did not pass the candidate threshold.</p></div></div>}
           {selectedClip && selectedClip.recording_id === selectedAnalysisId && <section className="clip-editor" id="clip-editor">
-            <div className="clip-editor-heading"><div><div className="section-overline">CLIP EDITOR</div><h4>{selectedClip.title}</h4><p>{formatDuration(selectedClip.end_seconds - selectedClip.start_seconds)} clip · Vertical 1080 × 1920 · source remains unchanged</p></div><span className={`clip-state clip-state-${selectedClip.status}`}>{selectedClip.status.replaceAll("_", " ")}</span></div>
+            <div className="clip-editor-heading"><div><div className="section-overline">CLIP EDITOR</div><h4>{selectedClip.title}</h4><p>{formatDuration(selectedClip.end_seconds - selectedClip.start_seconds)} clip · Choose a frame, layout, and caption look · source remains unchanged</p></div><span className={`clip-state clip-state-${selectedClip.status}`}>{selectedClip.status.replaceAll("_", " ")}</span></div>
             <div className="clip-editor-grid">
               <div className="clip-preview-column">
                 {selectedClip.preview_url ? <video className="clip-preview-video" controls preload="metadata" src={`${selectedClip.preview_url}?rendered=${encodeURIComponent(selectedClip.rendered_at ?? "latest")}`} /> : <div className="clip-preview-placeholder"><div className="empty-icon"><MonitorPlay size={19} /></div><strong>{selectedClip.status === "paused" ? "Render paused" : selectedClip.status === "rendering" || selectedClip.status === "queued" ? "Rendering your vertical clip" : "Preview appears after rendering"}</strong><p>FFmpeg fills the vertical frame with a blurred game backdrop and burns in the corrected captions.</p>{(selectedClip.status === "rendering" || selectedClip.status === "queued") && <LoaderCircle className="spin" size={16} />}</div>}
@@ -974,12 +1078,18 @@ function MediaPage({ onRefresh }: { onRefresh: () => void }) {
                 {jobs.find((job) => job.clip_id === selectedClip.id && job.status === "failed")?.error_message && <p className="clip-render-error"><AlertTriangle size={13} />{jobs.find((job) => job.clip_id === selectedClip.id && job.status === "failed")?.error_message}</p>}
               </div>
               <div className="clip-caption-editor">
-                <div className="caption-editor-heading"><div><strong>Caption correction</strong><span>Times are relative to this clip.</span></div><button className="row-action-button" disabled={captionDraft.length >= 300 || clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status) || (captionDraft.length > 0 && captionDraft[captionDraft.length - 1].end >= selectedClip.end_seconds - selectedClip.start_seconds)} onClick={() => { const clipDuration = selectedClip.end_seconds - selectedClip.start_seconds; const start = captionDraft.length ? captionDraft[captionDraft.length - 1].end : 0; setCaptionDraft((segments) => [...segments, { start, end: Math.min(clipDuration, start + 2), text: "" }]); }}>Add line</button></div>
+                <div className="caption-editor-heading"><div><strong>Caption correction</strong><span>Times are relative to this clip.</span></div><div className="caption-heading-actions"><input ref={captionFileRef} className="sr-only" type="file" accept=".srt,.vtt,text/vtt,application/x-subrip" onChange={(event) => void importCaptionFile(event.target.files?.[0])} /><button className="row-action-button" disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onClick={() => captionFileRef.current?.click()}><Upload size={12} /> Import SRT/VTT</button><button className="row-action-button" disabled={captionDraft.length >= 300 || clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status) || (captionDraft.length > 0 && captionDraft[captionDraft.length - 1].end >= selectedClip.end_seconds - selectedClip.start_seconds)} onClick={() => { const clipDuration = selectedClip.end_seconds - selectedClip.start_seconds; const start = captionDraft.length ? captionDraft[captionDraft.length - 1].end : 0; setCaptionDraft((segments) => [...segments, { start, end: Math.min(clipDuration, start + 2), text: "" }]); }}>Add line</button></div></div>
                 {captionDraft.length ? <div className="caption-edit-list">{captionDraft.map((segment, index) => <div className="caption-edit-row" key={`${index}-${segment.start}`}>
                   <div className="caption-time-fields"><label>In<input aria-label={`Caption ${index + 1} start time`} type="number" min="0" max={selectedClip.end_seconds - selectedClip.start_seconds} step="0.1" value={segment.start} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => updateCaption(index, "start", event.target.value)} /></label><label>Out<input aria-label={`Caption ${index + 1} end time`} type="number" min="0.1" max={selectedClip.end_seconds - selectedClip.start_seconds} step="0.1" value={segment.end} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => updateCaption(index, "end", event.target.value)} /></label><button className="icon-button caption-remove" aria-label={`Remove caption ${index + 1}`} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onClick={() => setCaptionDraft((segments) => segments.filter((_item, current) => current !== index))}>×</button></div>
                   <label className="sr-only" htmlFor={`caption-text-${index}`}>Caption text {index + 1}</label><textarea id={`caption-text-${index}`} maxLength={500} rows={2} value={segment.text} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => updateCaption(index, "text", event.target.value)} />
                 </div>)}</div> : <div className="caption-empty">No speech was detected in this highlight. Add caption lines if needed.</div>}
-                <div className="clip-editor-actions"><button className="secondary-button" disabled={!captionDraftChanged || clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onClick={() => void saveCaptions()}>{clipBusy ? <LoaderCircle size={13} className="spin" /> : <Check size={13} />}{captionDraftChanged ? "Save captions" : "Captions saved"}</button><button className="primary-button" disabled={clipBusy || captionDraftChanged || ["queued", "rendering", "paused", "rendered"].includes(selectedClip.status)} onClick={() => void renderClip()}>{clipBusy ? <LoaderCircle size={13} className="spin" /> : selectedClip.status === "rendered" ? <Check size={13} /> : <Play size={13} />}{selectedClip.status === "rendered" ? "Rendered" : selectedClip.status === "paused" ? "Render paused" : selectedClip.status === "queued" || selectedClip.status === "rendering" ? "Rendering…" : "Render vertical clip"}</button></div>
+                <div className="render-controls">
+                  <label>Frame<select value={renderOptions.aspect_ratio} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, aspect_ratio: event.target.value as RenderOptions["aspect_ratio"] }))}><option value="9:16">9:16 · Shorts</option><option value="1:1">1:1 · Square</option><option value="4:5">4:5 · Portrait</option><option value="16:9">16:9 · Landscape</option></select></label>
+                  <label>Layout<select value={renderOptions.layout} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, layout: event.target.value as RenderOptions["layout"] }))}><option value="blur">Blurred fill</option><option value="fit">Fit with bars</option><option value="fill">Crop to fill</option></select></label>
+                  <label>Captions<select value={renderOptions.caption_style} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, caption_style: event.target.value as RenderOptions["caption_style"] }))}><option value="neon">GTA Neon</option><option value="impact">Impact</option><option value="clean">Clean</option><option value="hormozi">Hormozi</option><option value="mrbeast">MrBeast</option></select></label>
+                  <label>Watermark<input maxLength={60} value={renderOptions.watermark_text} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, watermark_text: event.target.value }))} placeholder="Optional creator name" /></label>
+                </div>
+                <div className="clip-editor-actions"><button className="secondary-button" disabled={!captionDraftChanged || clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onClick={() => void saveCaptions()}>{clipBusy ? <LoaderCircle size={13} className="spin" /> : <Check size={13} />}{captionDraftChanged ? "Save captions" : "Captions saved"}</button><button className="primary-button" disabled={clipBusy || captionDraftChanged || ["queued", "rendering", "paused"].includes(selectedClip.status) || (selectedClip.status === "rendered" && !renderSettingsChanged)} onClick={() => void renderClip()}>{clipBusy ? <LoaderCircle size={13} className="spin" /> : selectedClip.status === "rendered" && !renderSettingsChanged ? <Check size={13} /> : <Play size={13} />}{selectedClip.status === "rendered" ? renderSettingsChanged ? "Re-render clip" : "Rendered" : selectedClip.status === "paused" ? "Render paused" : selectedClip.status === "queued" || selectedClip.status === "rendering" ? "Rendering…" : "Render clip"}</button></div>
                 <section className="metadata-editor" aria-label="Clip metadata">
                 <div className="metadata-editor-heading"><div><div className="section-overline">AI UPLOAD METADATA</div><strong>Title, description & relevant tags</strong><span>Generated from the gameplay context, ready for you to review and edit.</span></div><span className={`clip-state clip-state-${metadata?.status ?? "empty"}`}>{metadata?.status ?? "loading"}</span></div>
                   {!metadata ? <div className="metadata-loading"><LoaderCircle size={14} className="spin" /> Loading saved metadata…</div> : <>
@@ -996,11 +1106,126 @@ function MediaPage({ onRefresh }: { onRefresh: () => void }) {
               </div>
             </div>
           </section>}
-          <details className="full-transcript"><summary>Full transcript <span>{analysis.transcript?.segments.length ?? 0} segments</span></summary>{analysis.transcript?.segments.length ? <div className="transcript-list">{analysis.transcript.segments.map((segment, index) => <div className="transcript-line" key={`${segment.start}-${index}`}><time>{formatDuration(segment.start)}</time><span>{segment.text}</span></div>)}</div> : <p className="transcript-empty">No speech was recognized in this recording.</p>}</details>
+          <details className="full-transcript"><summary>Transcript explorer <span>{analysis.transcript?.segments.length ?? 0} segments</span></summary>{analysis.transcript?.segments.length ? <><div className="transcript-explorer-toolbar"><label className="clip-search"><Search size={14} /><input value={transcriptQuery} onChange={(event) => setTranscriptQuery(event.target.value)} placeholder="Find a line or phrase" /></label><span>Choose a line to build a clip around that moment.</span></div><div className="transcript-list">{visibleTranscriptSegments.map(({ segment, index }) => <div className="transcript-line" key={`${segment.start}-${index}`}><time>{formatDuration(segment.start)}</time><span>{segment.text}</span><button className="row-action-button" disabled={clipBusy} onClick={() => void createClipFromTranscript(segment.start)}><Clapperboard size={12} /> Clip here</button></div>)}</div>{!visibleTranscriptSegments.length && <p className="transcript-empty">No transcript lines match that phrase.</p>}</> : <p className="transcript-empty">No speech was recognized in this recording.</p>}</details>
         </>}
       </section>}
     </>
   );
+}
+
+function MyClipsPage({ onNavigate, onEditClip }: { onNavigate: (page: Page) => void; onEditClip: (clipId: string) => void }) {
+  const [clips, setClips] = useState<Clip[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [working, setWorking] = useState<string | null>(null);
+  const [filter, setFilter] = useState<"all" | "ready" | "processing">("all");
+  const [search, setSearch] = useState("");
+  const [pageError, setPageError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      setClips(await api<Clip[]>("/api/clips"));
+      setPageError(null);
+    } catch (reason) {
+      setPageError(reason instanceof Error ? reason.message : "Your clip library could not be loaded.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 4000);
+    return () => window.clearInterval(timer);
+  }, [refresh]);
+
+  const rendered = clips.filter((clip) => clip.status === "rendered" && clip.preview_url);
+  const processing = clips.filter((clip) => ["candidate", "queued", "rendering", "paused"].includes(clip.status));
+  const matchingClips = clips.filter((clip) => {
+    const matchesFilter = filter === "all" || (filter === "ready" ? clip.status === "rendered" : clip.status !== "rendered");
+    const query = search.trim().toLowerCase();
+    return matchesFilter && (!query || `${clip.upload_title} ${clip.title} ${clip.recording_name}`.toLowerCase().includes(query));
+  });
+
+  const downloadAll = async () => {
+    if (!rendered.length) return;
+    setWorking("download-all");
+    setPageError(null);
+    try {
+      const response = await fetch("/api/clips/download-all", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clip_ids: rendered.map((clip) => clip.id) }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.detail ?? `Download failed (${response.status})`);
+      }
+      const objectUrl = URL.createObjectURL(await response.blob());
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = "clipforge-clips.zip";
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+      setMessage(`${rendered.length} clips downloaded as a ZIP.`);
+    } catch (reason) {
+      setPageError(reason instanceof Error ? reason.message : "The clip bundle could not be downloaded.");
+    } finally {
+      setWorking(null);
+    }
+  };
+
+  const rateClip = async (clipId: string, rating: number) => {
+    try {
+      await api(`/api/clips/${encodeURIComponent(clipId)}/rating`, { method: "PATCH", body: JSON.stringify({ rating }) });
+      setClips((current) => current.map((clip) => clip.id === clipId ? { ...clip, user_rating: rating } : clip));
+    } catch (reason) {
+      setPageError(reason instanceof Error ? reason.message : "Your clip rating could not be saved.");
+    }
+  };
+
+  return <>
+    <section className="page-heading clips-heading">
+      <div><div className="eyebrow"><span className="eyebrow-line" /> YOUR BEST MOMENTS</div><h1>Your clips<span className="heading-period">.</span></h1><p className="heading-subtitle">Finished edits and clips still moving through the render queue.</p></div>
+      <div className="clips-heading-actions"><button className="secondary-button" onClick={() => void refresh()}><RefreshCw size={14} /> Refresh</button><button className="primary-button" onClick={() => onNavigate("media")}><Clapperboard size={15} /> Create clips</button></div>
+    </section>
+    {pageError && <div className="error-banner"><AlertTriangle size={15} /><span>{pageError}</span><button onClick={() => void refresh()}>Retry</button></div>}
+    {message && <div className="success-banner"><Check size={15} /><span>{message}</span><button aria-label="Dismiss message" onClick={() => setMessage(null)}>×</button></div>}
+
+    <section className="clip-library-summary">
+      <div className="clip-library-stat"><span>IN YOUR LIBRARY</span><strong>{loading ? "—" : clips.length}</strong></div>
+      <div className="clip-library-stat"><span>READY TO DOWNLOAD</span><strong>{loading ? "—" : rendered.length}</strong></div>
+      <div className="clip-library-stat"><span>IN PROGRESS</span><strong>{loading ? "—" : processing.length}</strong></div>
+      <button className="secondary-button" disabled={!rendered.length || working !== null} onClick={() => void downloadAll()}>{working === "download-all" ? <LoaderCircle size={14} className="spin" /> : <Download size={14} />} Download all</button>
+    </section>
+
+    <section className="clip-library-panel surface-card">
+      <div className="clip-library-toolbar">
+        <div className="clip-filter-tabs" role="group" aria-label="Filter clips">
+          {([ ["all", "All clips", clips.length], ["ready", "Ready", rendered.length], ["processing", "In progress", processing.length] ] as const).map(([value, label, count]) => <button key={value} aria-pressed={filter === value} className={filter === value ? "selected" : ""} onClick={() => setFilter(value)}>{label}<span>{count}</span></button>)}
+        </div>
+        <label className="clip-search"><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search clips or recordings" /></label>
+      </div>
+      {loading ? <div className="loading-state"><LoaderCircle className="spin" size={19} /> Loading your clips…</div> : matchingClips.length ? <div className="saved-clips-grid">
+        {matchingClips.map((clip) => <article className="saved-clip-card" key={clip.id}>
+          {clip.preview_url ? <video className="saved-clip-video" controls preload="metadata" src={`${clip.preview_url}?rendered=${encodeURIComponent(clip.rendered_at ?? "latest")}`} /> : <div className={`saved-clip-placeholder placeholder-${clip.status}`}><Film size={24} /><strong>{clip.status === "rendering" || clip.status === "queued" ? "Rendering" : clip.status === "failed" ? "Needs attention" : "Ready to render"}</strong><span>{clip.status.replaceAll("_", " ")}</span></div>}
+          <div className="saved-clip-body">
+            <div className="saved-clip-topline"><span className="saved-clip-score"><Sparkles size={12} /> {Math.round(clip.score)} score</span><span className={`clip-state clip-state-${clip.status}`}>{clip.status.replaceAll("_", " ")}</span></div>
+            <h3>{clip.upload_title || clip.title}</h3>
+            <p className="saved-clip-source">{clip.recording_name} · {formatDuration(clip.render_metadata.duration_seconds ?? clip.end_seconds - clip.start_seconds)}</p>
+            <div className="clip-rating" aria-label={`Rate clip, currently ${clip.user_rating ?? 0} out of 5 stars`}>{[1, 2, 3, 4, 5].map((rating) => <button key={rating} className={rating <= (clip.user_rating ?? 0) ? "rated" : ""} aria-label={`Rate ${rating} out of 5`} title={`Rate ${rating} out of 5`} onClick={() => void rateClip(clip.id, rating)}><Star size={13} fill={rating <= (clip.user_rating ?? 0) ? "currentColor" : "none"} /></button>)}<span>{clip.user_rating ? "Your rating" : "Rate this clip"}</span></div>
+            {clip.upload_description && <p className="saved-clip-description">{clip.upload_description}</p>}
+            <div className="saved-clip-tags">{clip.upload_hashtags.slice(0, 3).map((tag) => <span key={tag}>{tag}</span>)}</div>
+            <div className="saved-clip-actions">
+              {clip.preview_url && <a className="secondary-button" href={`/api/clips/${encodeURIComponent(clip.id)}/download`}><Download size={13} /> Download</a>}
+              <button className="secondary-button" onClick={() => onEditClip(clip.id)}><Film size={13} /> Edit clip</button>
+              <button className="clip-publish-action" onClick={() => onNavigate("youtube")}><Upload size={13} /> YouTube</button>
+            </div>
+          </div>
+        </article>)}
+      </div> : <div className="clips-library-empty"><div className="clips-empty-mark"><Film size={20} /></div><strong>{search ? "No clips match that search" : filter === "ready" ? "No finished clips yet" : "Your next favorite clip goes here"}</strong><p>{search ? "Try another title or source recording." : "Add a video in Create clips. Finished edits will appear here with a preview and download."}</p>{!search && <button className="primary-button" onClick={() => onNavigate("media")}><Clapperboard size={14} /> Start a clip batch</button>}</div>}
+    </section>
+  </>;
 }
 
 function YouTubePage({ onRefresh }: { onRefresh: () => void }) {

@@ -51,6 +51,7 @@ def generate_highlights(
     transcript_segments: list[dict[str, Any]],
     max_candidates: int = 5,
     window_seconds: float = 30.0,
+    moment_mix: str = "balanced",
 ) -> list[dict[str, Any]]:
     """Rank context-preserving candidate windows from audio, transcript, and scene signals."""
     duration = max(0.0, duration_seconds)
@@ -103,11 +104,16 @@ def generate_highlights(
         speech_signal = min(1.0, speech_density / baseline_speech)
         excitement_signal = min(1.0, cues / max(1.0, (end - start) / 12.0))
 
+        weights = {
+            "balanced": (0.34, 0.24, 0.27, 0.15),
+            "action": (0.46, 0.12, 0.20, 0.22),
+            "dialogue": (0.12, 0.48, 0.30, 0.10),
+        }.get(moment_mix, (0.34, 0.24, 0.27, 0.15))
         score = 100.0 * (
-            0.34 * energy_signal
-            + 0.24 * speech_signal
-            + 0.27 * excitement_signal
-            + 0.15 * scene_signal
+            weights[0] * energy_signal
+            + weights[1] * speech_signal
+            + weights[2] * excitement_signal
+            + weights[3] * scene_signal
         )
         if score < 22 or (not local_segments and not local_cuts and energy_signal < 0.18):
             continue

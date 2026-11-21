@@ -99,6 +99,7 @@ def _process_job(job: dict[str, Any]) -> None:
                     recording_id,
                     clip_count=auto_analysis.get("clip_count", 1),
                     clip_duration_seconds=auto_analysis.get("clip_duration_seconds", 30),
+                    moment_mix=auto_analysis.get("moment_mix", "balanced"),
                 )
                 logger.info("Queued automatic clip analysis for recording %s as job %s", recording_id, queued["id"])
         elif job["job_type"] == "analyze_recording":
@@ -133,6 +134,7 @@ def _process_job(job: dict[str, Any]) -> None:
                 transcript_segments=result["transcript"]["segments"],
                 max_candidates=max(1, min(int(payload.get("clip_count", 1)), 100)),
                 window_seconds=max(15, min(int(payload.get("clip_duration_seconds", 30)), 45)),
+                moment_mix=str(payload.get("moment_mix", "balanced")),
             )
             clip_ids = save_analysis_result(recording_id, result, candidates)
             if payload.get("auto_process", True):
@@ -152,6 +154,7 @@ def _process_job(job: dict[str, Any]) -> None:
                 raise RuntimeError("The source recording has no authorization confirmation.")
             update_job(job_id, stage="preparing_subtitles", progress=12)
             clip_path = OUTPUT_DIR / recording_id / "clips" / f"{clip_id}.mp4"
+            render_options = json.loads(job.get("payload_json") or "{}")
 
             def render_progress(value: int, stage: str) -> None:
                 update_job(job_id, stage=stage, progress=value)
@@ -162,6 +165,7 @@ def _process_job(job: dict[str, Any]) -> None:
                 start_seconds=float(clip["start_seconds"]),
                 end_seconds=float(clip["end_seconds"]),
                 subtitles=clip["subtitles"],
+                render_options=render_options,
                 progress=render_progress,
                 check_cancel=_ensure_not_paused,
                 cpu_threads=cpu_threads,

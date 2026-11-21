@@ -10,11 +10,16 @@ The readiness card reports FFmpeg, NVIDIA GPU, faster-whisper, and Ollama availa
 
 1. Open **Create clips** and choose **Upload video**, **Paste a link**, or **Local path**. Uploads and direct media-file links are copied into the configured output folder's `sources` directory; local paths are read in place. A link must return a video file directly (MP4, MKV, MOV, AVI, MPEG, or WebM). YouTube, Twitch, and Kick watch pages are not direct video files. For your own YouTube upload, download its MP4 from [YouTube Studio](https://studio.youtube.com) first.
 2. Confirm that you own the recording or are authorized to use it.
-3. Choose how many clips to create (1–100, default 1) and a duration (15, 30, or 45 seconds), then choose **Make clips**. Inspection starts first, then ClipForge queues analysis automatically.
-4. On first use, faster-whisper downloads the selected model into app data. Transcription and moment ranking run locally. Open **View results** to review the transcript, edit captions, and preview each render.
+3. Choose how many clips to create (1–100, default 1), a duration (15, 30, or 45 seconds), and a moment mix: **Balanced**, **Action**, or **Dialogue**. Then choose **Make clips**. Inspection starts first, then ClipForge queues analysis automatically.
+4. On first use, faster-whisper downloads the selected model into app data. Transcription and moment ranking run locally. Open **View results** to review ranked highlights, search the transcript, or choose **Clip here** to make a clip around a passage.
 5. ClipForge queues vertical renders with captions and generates a title, description, hashtags, and relevant search tags for each result.
+6. In the clip editor, import SRT/WebVTT captions or edit lines, then choose the output frame (Shorts, square, 4:5, or landscape), layout (blurred fill, fit, crop), caption look, and optional watermark. Select **Render clip**; a changed style can be rendered again.
 
-Moment scores rank audio peaks, speech, excitement cues, and scene changes. The requested count is a maximum; a source may produce fewer clips when moments do not meet the signal threshold. Candidates shorter than the requested duration can occur when the source itself is shorter.
+Moment scores rank audio peaks, speech, excitement cues, and scene changes. The selected moment mix changes how those signals are weighted. The requested count is a maximum; a source may produce fewer clips when moments do not meet the signal threshold. Candidates shorter than the requested duration can occur when the source itself is shorter.
+
+## My clips
+
+Open **My clips** to search and filter your finished edits, view previews and generated metadata, rate clips from one to five stars, open the editor for any clip, and download one MP4 or the whole rendered batch as a ZIP. YouTube takes you to the upload and schedule controls for individual clips.
 
 ## Download clips
 
