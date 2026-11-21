@@ -13,6 +13,7 @@ from .database import (
     complete_youtube_publication,
     create_render_job,
     get_clip_youtube_upload_input,
+    get_clip_rating_examples,
     get_clip_generation_input,
     get_clip_render_input,
     get_recording_analysis,
@@ -30,7 +31,7 @@ from .database import (
 )
 from .config import OUTPUT_DIR
 from .clip_rendering import render_vertical_clip
-from .media import probe_video, resolve_music_asset, validate_video_path
+from .media import probe_video, resolve_image_asset, resolve_music_asset, validate_video_path
 from .highlights import generate_highlights
 from .transcription import transcribe_recording
 from .metadata import generate_clip_metadata
@@ -99,6 +100,9 @@ def _process_job(job: dict[str, Any]) -> None:
                     recording_id,
                     clip_count=auto_analysis.get("clip_count", 1),
                     clip_duration_seconds=auto_analysis.get("clip_duration_seconds", 30),
+                    clip_min_seconds=auto_analysis.get("clip_min_seconds", 15),
+                    clip_max_seconds=auto_analysis.get("clip_max_seconds", 45),
+                    analysis_mode=auto_analysis.get("analysis_mode", "fast"),
                     moment_mix=auto_analysis.get("moment_mix", "balanced"),
                     transcription_language=auto_analysis.get("transcription_language", "auto"),
                     render_options=auto_analysis.get("render_options", {}),
@@ -127,6 +131,7 @@ def _process_job(job: dict[str, Any]) -> None:
                 recording_id=recording_id,
                 model_name=settings["transcription_model"],
                 language=transcription_language if transcription_language not in {None, "", "auto"} else None,
+                analysis_mode=str(payload.get("analysis_mode", "fast")),
                 cpu_threads=cpu_threads,
                 progress=progress,
                 check_cancel=check_cancel,
@@ -138,9 +143,14 @@ def _process_job(job: dict[str, Any]) -> None:
                 scene_cuts=result["scene_cuts"],
                 transcript_segments=result["transcript"]["segments"],
                 max_candidates=max(1, min(int(payload.get("clip_count", 1)), 100)),
-                window_seconds=max(15, min(int(payload.get("clip_duration_seconds", 30)), 45)),
+                window_seconds=max(15, min(int(payload.get("clip_max_seconds", payload.get("clip_duration_seconds", 30))), 45)),
+                min_window_seconds=max(15, min(int(payload.get("clip_min_seconds", 15)), 45)),
+                max_window_seconds=max(15, min(int(payload.get("clip_max_seconds", payload.get("clip_duration_seconds", 30))), 45)),
                 moment_mix=str(payload.get("moment_mix", "balanced")),
                 focus_prompt=str(payload.get("focus_prompt", "")),
+                visual_motion_by_second=result.get("visual_motion_by_second", []),
+                analysis_mode=str(payload.get("analysis_mode", "fast")),
+                rating_examples=get_clip_rating_examples(),
             )
             clip_ids = save_analysis_result(recording_id, result, candidates)
             if payload.get("auto_process", True):
@@ -162,6 +172,8 @@ def _process_job(job: dict[str, Any]) -> None:
             clip_path = OUTPUT_DIR / recording_id / "clips" / f"{clip_id}.mp4"
             render_options = json.loads(job.get("payload_json") or "{}")
             music_source = resolve_music_asset(render_options["music_asset_id"]) if render_options.get("music_asset_id") else None
+            logo_source = resolve_image_asset(render_options["logo_asset_id"]) if render_options.get("logo_asset_id") else None
+            background_source = resolve_image_asset(render_options["background_asset_id"]) if render_options.get("background_asset_id") else None
 
             def render_progress(value: int, stage: str) -> None:
                 update_job(job_id, stage=stage, progress=value)
@@ -174,6 +186,8 @@ def _process_job(job: dict[str, Any]) -> None:
                 subtitles=clip["subtitles"],
                 render_options=render_options,
                 music_source=music_source,
+                logo_source=logo_source,
+                background_source=background_source,
                 progress=render_progress,
                 check_cancel=_ensure_not_paused,
                 cpu_threads=cpu_threads,

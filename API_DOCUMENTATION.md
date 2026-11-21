@@ -31,15 +31,15 @@ Returns source paths, metadata, state, authorization confirmation, and transcrip
 
 ## `POST /api/recordings`
 
-Accepts a local `path`, `authorized: true`, and optional `auto_analyze`, `clip_count` (1–100), `clip_duration_seconds` (15–45), `moment_mix` (`balanced`, `action`, or `dialogue`), `transcription_language`, `render_options`, and `focus_prompt` (up to 160 characters). A focus phrase gives transcript windows with matching words a small ranking boost. When `auto_analyze` is true, inspection queues analysis automatically when the file is ready. The service verifies that the file exists and uses a supported video extension. Duplicate paths return `409`; absent authorization returns `400`.
+Accepts a local `path`, `authorized: true`, and optional `auto_analyze`, `clip_count` (1–100), `clip_duration_seconds` (15–45), `clip_min_seconds` and `clip_max_seconds` (each 15–45, minimum must not exceed maximum), `analysis_mode` (`fast` or `deep`), `moment_mix` (`balanced`, `action`, or `dialogue`), `transcription_language`, `render_options`, and `focus_prompt` (up to 160 characters). A focus phrase gives transcript windows with matching words a small ranking boost. Deep mode includes a low-resolution visual-motion signal. When `auto_analyze` is true, inspection queues analysis automatically when the file is ready. The service verifies that the file exists and uses a supported video extension. Duplicate paths return `409`; absent authorization returns `400`.
 
 ## `POST /api/recordings/upload`
 
-Accepts the raw video file as the request body and query parameters `filename`, `authorized=true`, `auto_analyze=true`, `clip_count=1`, `clip_duration_seconds=30`, and `moment_mix=balanced`, plus `transcription_language`, `render_options` (JSON-encoded), and `focus_prompt`. Supported files are MP4, M4V, MKV, MOV, AVI, MPEG, and WebM, up to 20 GB. The uploaded source is stored in `CLIPFORGE_OUTPUT_DIR\sources` (or the default output directory) before inspection.
+Accepts the raw video file as the request body and query parameters `filename`, `authorized=true`, `auto_analyze=true`, `clip_count=1`, `clip_duration_seconds=30`, `clip_min_seconds=15`, `clip_max_seconds=45`, `analysis_mode=fast`, and `moment_mix=balanced`, plus `transcription_language`, `render_options` (JSON-encoded), and `focus_prompt`. Supported files are MP4, M4V, MKV, MOV, AVI, MPEG, and WebM, up to 20 GB. The uploaded source is stored in `CLIPFORGE_OUTPUT_DIR\sources` (or the default output directory) before inspection.
 
 ## `POST /api/recordings/import-link`
 
-Accepts `{"url":"https://host/video.mp4","authorized":true,"auto_analyze":true,"clip_count":1,"clip_duration_seconds":30,"moment_mix":"balanced","transcription_language":"auto","render_options":{...},"focus_prompt":"ranked comeback"}`. The link must be public HTTP(S) and return a direct video file; local/private network addresses, webpages, and playlists are rejected. Redirects are checked before each request and the source is capped at 20 GB. Platform watch pages such as YouTube, Twitch, and Kick are not direct media-file URLs.
+Accepts `{"url":"https://host/video.mp4","authorized":true,"auto_analyze":true,"clip_count":1,"clip_duration_seconds":30,"clip_min_seconds":15,"clip_max_seconds":45,"analysis_mode":"fast","moment_mix":"balanced","transcription_language":"auto","render_options":{...},"focus_prompt":"ranked comeback"}`. The link must be public HTTP(S) and return a direct video file; local/private network addresses, webpages, and playlists are rejected. Redirects are checked before each request and the source is capped at 20 GB. Platform watch pages such as YouTube, Twitch, and Kick are not direct media-file URLs.
 
 ## `POST /api/recordings/browse`
 
@@ -51,11 +51,15 @@ Accepts raw MP3, M4A, AAC, WAV, OGG, FLAC, or OPUS audio with a `filename` query
 
 ## `POST /api/recordings/{recording_id}/analyze`
 
-Accepts `{"clip_count":1,"clip_duration_seconds":30,"moment_mix":"balanced","transcription_language":"auto","render_options":{...},"focus_prompt":"ranked comeback"}`; count is 1–100 (default 1), duration is 15–45 seconds (default 30), and moment mix is `balanced`, `action`, or `dialogue`. `transcription_language` accepts `auto`, `en`, `hi`, `es`, `fr`, `de`, `pt`, `ja`, `ko`, `zh`, `it`, `ru`, or `ar`. A focus phrase (up to 160 characters) gives transcript windows with matching words a small ranking boost. Queues local transcription and highlight analysis for an inspected, authorized recording, then automatically queues a render in the requested format and metadata generation for each returned candidate. Repeated requests return the existing active analysis job. The requested count is a maximum because low-signal sources may yield fewer candidates.
+Accepts `{"clip_count":1,"clip_duration_seconds":30,"clip_min_seconds":15,"clip_max_seconds":45,"analysis_mode":"fast","moment_mix":"balanced","transcription_language":"auto","render_options":{...},"focus_prompt":"ranked comeback"}`; count is 1–100 (default 1), durations are 15–45 seconds, analysis mode is `fast` or `deep`, and moment mix is `balanced`, `action`, or `dialogue`. The language selector includes Hinglish and the supported Whisper language codes. Deep mode adds a low-resolution visual-motion scan. A focus phrase (up to 160 characters) gives transcript windows with matching words a small ranking boost. Queues local transcription and highlight analysis for an inspected, authorized recording, then automatically queues a render in the requested format and metadata generation for each returned candidate. Repeated requests return the existing active analysis job. The requested count is a maximum because low-signal sources may yield fewer candidates.
 
 ## `GET /api/recordings/{recording_id}/analysis`
 
 Returns transcript segments, analysis summary, candidate scores, timestamps, reason labels, signal breakdowns, per-candidate editable captions, and render status/metadata.
+
+## `POST /api/recordings/{recording_id}/ai-parts`
+
+Accepts `{"count":5,"focus_prompt":"clutch plays"}` with a count from 1 to 100 and an optional focus phrase of up to 160 characters. Requires a transcript and the recording's existing authorization confirmation. ClipForge asks the configured localhost Ollama model for distinct source ranges between 15 and 45 seconds, validates timestamps and source bounds, and returns `parts`, `provider`, `model_name`, and a note. If Ollama is unavailable or its ranges are invalid, ranked local highlight candidates are returned instead. The local model receives transcript text and timestamps, not source video files.
 
 ## `GET /api/recordings/{recording_id}/source-preview`
 
@@ -64,6 +68,14 @@ Streams the authorized local source file for in-browser scene review. The respon
 ## `POST /api/recordings/{recording_id}/clips/from-transcript`
 
 Accepts `{"start_seconds":72.4,"clip_duration_seconds":30}` and creates a 15–45 second candidate centered near the chosen transcript timestamp, including the matching caption lines. The recording must have a transcript and authorization confirmation.
+
+## `POST /api/recordings/{recording_id}/clips/from-range`
+
+Accepts an exact `{"start_seconds":72.4,"end_seconds":103.8}` range and creates a transcript-backed clip with matching relative captions. The range must be between 15 and 45 seconds and fit inside the source recording.
+
+## `POST /api/images/upload`
+
+Accepts a raw PNG, JPEG, or WebP image body with a `filename` query parameter. Images are limited to 25 MB, checked against their file signatures, and stored under the configured output folder's local image-assets directory. The response contains an opaque `asset_id` and display name for render options.
 
 ## `POST /api/recordings/{recording_id}/clips/render`
 
@@ -83,7 +95,7 @@ Saves clip-relative caption edits. `segments` is an array of `{ "start": 0.0, "e
 
 ## `POST /api/clips/{clip_id}/render`
 
-Accepts optional render settings: `aspect_ratio` (`9:16`, `1:1`, `4:5`, `16:9`), `format_preset` (`youtube_shorts`, `tiktok`, `instagram_reels`, `instagram_portrait`, `square`, `landscape`, `custom`), `resolution` (`720`, `1080`, `2160`), `frame_rate` (`source`, `24`, `30`, `60`), and `layout` (`blur`, `blur_top`, `blur_bottom`, `fit`, `fill`, `fill_top`, `fill_bottom`, `gameplay_only`, `facecam_overlay`, `camera_top`, `camera_bottom`, `side_by_side`). `gameplay_box` and `facecam_box` are normalized rectangles shaped like `{"x":0.1,"y":0.1,"width":0.7,"height":0.7}`; each dimension must be at least 4% of the source. Gameplay-only requires `gameplay_box`; camera layouts require `facecam_box`. For picture-in-picture, `facecam_position` accepts `top_left`, `top_right`, `bottom_left`, `bottom_right`, or `bottom_center`; `facecam_size_percent` ranges from 16 to 50. Other settings include `caption_style` (`neon`, `impact`, `clean`, `hormozi`, `mrbeast`), `caption_animation` (`static`, `word_highlight`), `watermark_text` (up to 60 characters), `opening_hook` and `outro_text` (up to 100 characters each), `caption_font` (`Arial`, `Impact`, `Tahoma`, `Verdana`), `caption_size` (24–100), `caption_text_color` and `caption_outline_color` (hex colors), `caption_words_per_line` (2–12), `music_asset_id` (optional ID returned from music upload), `music_volume` (0–100), and `music_fade_seconds` (0–5). Queues a local render for an authorized candidate. FFmpeg trims the source timestamps and burns in captions/overlays; music is mixed with source audio and faded at both ends. Re-rendering uses the selected settings; the source recording is read-only.
+Accepts optional render settings: `aspect_ratio` (`9:16`, `1:1`, `4:5`, `16:9`), `format_preset` (`youtube_shorts`, `tiktok`, `instagram_reels`, `instagram_portrait`, `square`, `landscape`, `custom`), `resolution` (`720`, `1080`, `2160`), `frame_rate` (`source`, `24`, `30`, `60`), and `layout` (`blur`, `blur_top`, `blur_bottom`, `fit`, `fill`, `fill_top`, `fill_bottom`, `gameplay_only`, `facecam_overlay`, `facecam_circle`, `camera_top`, `camera_bottom`, `side_by_side`, `no_facecam`). `gameplay_box` and `facecam_box` are normalized rectangles shaped like `{"x":0.1,"y":0.1,"width":0.7,"height":0.7}`; each dimension must be at least 4% of the source. Gameplay-only requires `gameplay_box`; camera layouts require `facecam_box`. For picture-in-picture, `facecam_position` accepts `top_left`, `top_right`, `bottom_left`, `bottom_right`, or `bottom_center`; `facecam_size_percent` ranges from 16 to 50. Other settings include five `caption_style` presets, `caption_animation` (`static`, `word_highlight`, `pop_in`, `pop_in_line`, `one_by_one`, `build_up`), hook/outro text and timing, social `template` values (`none`, `x_light`, `x_dark`, `tiktok_hook`, `breaking_news`), `background_mode` (`none`, `blur`, `color`, `gradient`, `image`), validated hex colors, optional uploaded background/logo asset IDs, logo position/size/opacity, credit text, frame padding and background dimming, caption font/size/colors/words-per-line, and an optional music asset with base/peak volume, riser, and fade settings. Queues a local render for an authorized candidate. FFmpeg trims the source timestamps and burns in captions/overlays; music is mixed with source audio and faded at both ends. Re-rendering uses the selected settings; the source recording is read-only.
 
 ## `PATCH /api/clips/{clip_id}/range`
 

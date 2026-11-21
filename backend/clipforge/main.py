@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from starlette.background import BackgroundTask
 
 from .config import DATA_DIR, OUTPUT_DIR
+from .languages import TranscriptionLanguage
 from .clip_rendering import subtitle_files
 from .database import (
     create_analysis_job,
@@ -54,7 +55,8 @@ from .database import (
 )
 from .media import choose_video_file, validate_audio_path, validate_video_path
 from .live_capture import live_capture, validate_local_stream_url
-from .source_import import SourceImportError, download_direct_video, save_uploaded_music, save_uploaded_video
+from .parts import generate_ai_parts
+from .source_import import SourceImportError, download_direct_video, save_uploaded_image, save_uploaded_music, save_uploaded_video
 from .system_info import collect_system_info
 from .worker import run_worker
 from .youtube_api import YouTubeAPIError, channel_analytics
@@ -116,10 +118,19 @@ class RecordingImportOptions(BaseModel):
     auto_analyze: bool = False
     clip_count: int = Field(default=1, ge=1, le=100)
     clip_duration_seconds: int = Field(default=30, ge=15, le=45)
+    clip_min_seconds: int = Field(default=15, ge=15, le=45)
+    clip_max_seconds: int = Field(default=45, ge=15, le=45)
+    analysis_mode: Literal["fast", "deep"] = "fast"
     moment_mix: Literal["balanced", "action", "dialogue"] = "balanced"
-    transcription_language: Literal["auto", "en", "hi", "es", "fr", "de", "pt", "ja", "ko", "zh", "it", "ru", "ar"] = "auto"
+    transcription_language: TranscriptionLanguage = "auto"
     render_options: dict[str, Any] = Field(default_factory=dict)
     focus_prompt: str = Field(default="", max_length=160)
+
+    @model_validator(mode="after")
+    def validate_clip_length_range(self) -> "RecordingImportOptions":
+        if self.clip_min_seconds > self.clip_max_seconds:
+            raise ValueError("Minimum clip length must not exceed maximum clip length.")
+        return self
 
     @field_validator("render_options")
     @classmethod
@@ -150,10 +161,19 @@ class AnalyzeRecordingRequest(BaseModel):
 
     clip_count: int = Field(default=1, ge=1, le=100)
     clip_duration_seconds: int = Field(default=30, ge=15, le=45)
+    clip_min_seconds: int = Field(default=15, ge=15, le=45)
+    clip_max_seconds: int = Field(default=45, ge=15, le=45)
+    analysis_mode: Literal["fast", "deep"] = "fast"
     moment_mix: Literal["balanced", "action", "dialogue"] = "balanced"
-    transcription_language: Literal["auto", "en", "hi", "es", "fr", "de", "pt", "ja", "ko", "zh", "it", "ru", "ar"] = "auto"
+    transcription_language: TranscriptionLanguage = "auto"
     render_options: dict[str, Any] = Field(default_factory=dict)
     focus_prompt: str = Field(default="", max_length=160)
+
+    @model_validator(mode="after")
+    def validate_clip_length_range(self) -> "AnalyzeRecordingRequest":
+        if self.clip_min_seconds > self.clip_max_seconds:
+            raise ValueError("Minimum clip length must not exceed maximum clip length.")
+        return self
 
     @field_validator("render_options")
     @classmethod
@@ -245,7 +265,7 @@ class RenderOptions(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     aspect_ratio: Literal["9:16", "1:1", "4:5", "16:9"] = "9:16"
-    layout: Literal["blur", "blur_top", "blur_bottom", "fit", "fill", "fill_top", "fill_bottom", "gameplay_only", "facecam_overlay", "camera_top", "camera_bottom", "side_by_side"] = "blur"
+    layout: Literal["blur", "blur_top", "blur_bottom", "fit", "fill", "fill_top", "fill_bottom", "gameplay_only", "facecam_overlay", "facecam_circle", "camera_top", "camera_bottom", "side_by_side", "no_facecam"] = "blur"
     format_preset: Literal["youtube_shorts", "tiktok", "instagram_reels", "instagram_portrait", "square", "landscape", "custom"] = "custom"
     resolution: Literal[720, 1080, 2160] = 1080
     frame_rate: Literal["source", 24, 30, 60] = "source"
@@ -254,18 +274,38 @@ class RenderOptions(BaseModel):
     facecam_position: Literal["top_left", "top_right", "bottom_left", "bottom_right", "bottom_center"] = "top_right"
     facecam_size_percent: int = Field(default=31, ge=16, le=50)
     caption_style: Literal["neon", "impact", "clean", "hormozi", "mrbeast"] = "neon"
+    template: Literal["none", "x_light", "x_dark", "tiktok_hook", "breaking_news"] = "none"
+    template_name: str = Field(default="", max_length=60)
+    template_handle: str = Field(default="", max_length=60)
+    background_mode: Literal["none", "blur", "color", "gradient", "image"] = "none"
+    background_color: str = Field(default="#181326", pattern=r"^#[0-9A-Fa-f]{6}$")
+    background_color2: str = Field(default="#542558", pattern=r"^#[0-9A-Fa-f]{6}$")
+    background_asset_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
+    background_name: str = Field(default="", max_length=180)
+    background_dim_percent: int = Field(default=22, ge=0, le=80)
+    card_padding_percent: int = Field(default=14, ge=0, le=30)
     watermark_text: str = Field(default="", max_length=60)
+    logo_asset_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
+    logo_name: str = Field(default="", max_length=180)
+    logo_position: Literal["top_left", "top_right", "bottom_left", "bottom_right"] = "top_right"
+    logo_size_percent: int = Field(default=16, ge=5, le=35)
+    logo_opacity: int = Field(default=85, ge=10, le=100)
+    credit_text: str = Field(default="", max_length=100)
     opening_hook: str = Field(default="", max_length=100)
+    opening_hook_seconds: int = Field(default=8, ge=2, le=60)
     outro_text: str = Field(default="", max_length=100)
+    outro_seconds: float = Field(default=3, ge=1.5, le=8)
     caption_font: Literal["Arial", "Impact", "Tahoma", "Verdana"] = "Arial"
     caption_size: int = Field(default=50, ge=24, le=100)
     caption_text_color: str = Field(default="#FFFFFF", pattern=r"^#[0-9A-Fa-f]{6}$")
     caption_outline_color: str = Field(default="#351633", pattern=r"^#[0-9A-Fa-f]{6}$")
     caption_words_per_line: int = Field(default=5, ge=2, le=12)
-    caption_animation: Literal["static", "word_highlight"] = "static"
+    caption_animation: Literal["static", "word_highlight", "pop_in", "pop_in_line", "one_by_one", "build_up"] = "static"
     music_asset_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
     music_name: str = Field(default="", max_length=180)
     music_volume: int = Field(default=20, ge=0, le=100)
+    music_peak_volume: int = Field(default=85, ge=0, le=100)
+    music_riser_seconds: int = Field(default=4, ge=1, le=15)
     music_fade_seconds: float = Field(default=1.5, ge=0, le=5)
 
     @model_validator(mode="after")
@@ -278,8 +318,10 @@ class RenderOptions(BaseModel):
             self.aspect_ratio = ratio_by_preset[self.format_preset]
         if self.layout == "gameplay_only" and self.gameplay_box is None:
             raise ValueError("Draw a gameplay region before choosing gameplay-only framing.")
-        if self.layout in {"facecam_overlay", "camera_top", "camera_bottom", "side_by_side"} and self.facecam_box is None:
+        if self.layout in {"facecam_overlay", "facecam_circle", "camera_top", "camera_bottom", "side_by_side"} and self.facecam_box is None:
             raise ValueError("Draw a facecam region before choosing a camera layout.")
+        if self.background_mode == "image" and self.background_asset_id is None:
+            raise ValueError("Upload a background image before selecting image background mode.")
         return self
 
     @field_validator("watermark_text")
@@ -313,7 +355,7 @@ class LiveClipRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     duration_seconds: Literal[15, 30, 45] = 30
-    transcription_language: Literal["auto", "en", "hi", "es", "fr", "de", "pt", "ja", "ko", "zh", "it", "ru", "ar"] = "auto"
+    transcription_language: TranscriptionLanguage = "auto"
     render_options: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("render_options")
@@ -333,6 +375,31 @@ class TranscriptClipRequest(BaseModel):
 
     start_seconds: float = Field(ge=0, le=86400)
     clip_duration_seconds: int = Field(default=30, ge=15, le=45)
+
+
+class GenerateAIPartsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    count: int = Field(default=5, ge=1, le=100)
+    focus_prompt: str = Field(default="", max_length=160)
+
+    @field_validator("focus_prompt")
+    @classmethod
+    def clean_focus_prompt(cls, value: str) -> str:
+        return " ".join(value.split())
+
+
+class TranscriptRangeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    start_seconds: float = Field(ge=0)
+    end_seconds: float = Field(gt=0)
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "TranscriptRangeRequest":
+        if self.end_seconds - self.start_seconds < 15 or self.end_seconds - self.start_seconds > 45:
+            raise ValueError("Choose a transcript range between 15 and 45 seconds.")
+        return self
 
 
 class ClipRangeRequest(BaseModel):
@@ -492,6 +559,35 @@ def recording_analysis(recording_id: str) -> dict[str, Any]:
     return result
 
 
+@app.post("/api/recordings/{recording_id}/ai-parts")
+async def suggest_recording_parts(recording_id: str, payload: GenerateAIPartsRequest) -> dict[str, Any]:
+    source = get_recording_source(recording_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Recording not found.")
+    if not source["authorized"]:
+        raise HTTPException(status_code=403, detail="This recording has no authorization confirmation.")
+    result = get_recording_analysis(recording_id)
+    if result is None or result["transcript"] is None:
+        raise HTTPException(status_code=409, detail="Transcribe the recording before asking AI to suggest parts.")
+    recording = next((item for item in list_recordings() if item["id"] == recording_id), None)
+    if recording is None or recording.get("duration_seconds") is None:
+        raise HTTPException(status_code=409, detail="The source duration is not available yet.")
+    settings = read_settings()
+    try:
+        return await asyncio.to_thread(
+            generate_ai_parts,
+            transcript_segments=result["transcript"]["segments"],
+            candidates=result["candidates"],
+            duration_seconds=float(recording["duration_seconds"]),
+            count=payload.count,
+            focus_prompt=payload.focus_prompt,
+            ollama_url=settings["ollama_url"],
+            ollama_model=settings["ollama_model"],
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
 @app.get("/api/recordings/{recording_id}/source-preview")
 def recording_source_preview(recording_id: str) -> FileResponse:
     source = get_recording_source(recording_id)
@@ -550,6 +646,26 @@ def trim_clip(clip_id: str, payload: ClipRangeRequest) -> dict[str, Any]:
 def clip_from_transcript(recording_id: str, payload: TranscriptClipRequest) -> dict[str, Any]:
     try:
         clip = create_transcript_clip(recording_id, payload.start_seconds, payload.clip_duration_seconds)
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    if clip is None:
+        raise HTTPException(status_code=404, detail="Recording not found.")
+    return clip
+
+
+@app.post("/api/recordings/{recording_id}/clips/from-range", status_code=201)
+def clip_from_transcript_range(recording_id: str, payload: TranscriptRangeRequest) -> dict[str, Any]:
+    try:
+        clip = create_transcript_clip(
+            recording_id,
+            payload.start_seconds,
+            int(round(payload.end_seconds - payload.start_seconds)),
+            exact_range=(payload.start_seconds, payload.end_seconds),
+        )
     except PermissionError as error:
         raise HTTPException(status_code=403, detail=str(error)) from error
     except RuntimeError as error:
@@ -834,6 +950,9 @@ def analyze_recording(
             recording_id,
             clip_count=options.clip_count,
             clip_duration_seconds=options.clip_duration_seconds,
+            clip_min_seconds=options.clip_min_seconds,
+            clip_max_seconds=options.clip_max_seconds,
+            analysis_mode=options.analysis_mode,
             moment_mix=options.moment_mix,
             transcription_language=options.transcription_language,
             render_options=options.render_options,
@@ -857,6 +976,9 @@ def _register_recording(path: Path, display_name: str, options: RecordingImportO
         auto_analysis = {
             "clip_count": options.clip_count,
             "clip_duration_seconds": options.clip_duration_seconds,
+            "clip_min_seconds": options.clip_min_seconds,
+            "clip_max_seconds": options.clip_max_seconds,
+            "analysis_mode": options.analysis_mode,
             "moment_mix": options.moment_mix,
             "transcription_language": options.transcription_language,
             "render_options": options.render_options,
@@ -892,8 +1014,11 @@ async def upload_recording(
     auto_analyze: bool = Query(default=True),
     clip_count: int = Query(default=1, ge=1, le=100),
     clip_duration_seconds: int = Query(default=30, ge=15, le=45),
+    clip_min_seconds: int = Query(default=15, ge=15, le=45),
+    clip_max_seconds: int = Query(default=45, ge=15, le=45),
+    analysis_mode: Literal["fast", "deep"] = Query(default="fast"),
     moment_mix: Literal["balanced", "action", "dialogue"] = Query(default="balanced"),
-    transcription_language: Literal["auto", "en", "hi", "es", "fr", "de", "pt", "ja", "ko", "zh", "it", "ru", "ar"] = Query(default="auto"),
+    transcription_language: TranscriptionLanguage = Query(default="auto"),
     render_options: str = Query(default="{}", max_length=3000),
     focus_prompt: str = Query(default="", max_length=160),
 ) -> dict[str, Any]:
@@ -908,6 +1033,9 @@ async def upload_recording(
             auto_analyze=auto_analyze,
             clip_count=clip_count,
             clip_duration_seconds=clip_duration_seconds,
+            clip_min_seconds=clip_min_seconds,
+            clip_max_seconds=clip_max_seconds,
+            analysis_mode=analysis_mode,
             moment_mix=moment_mix,
             transcription_language=transcription_language,
             render_options=render_options_value,
@@ -928,6 +1056,17 @@ async def upload_music(request: Request, filename: str = Query(min_length=1, max
     try:
         path, display_name = await save_uploaded_music(filename, request.stream())
         validate_audio_path(str(path))
+    except (SourceImportError, ValueError, RuntimeError) as error:
+        if "path" in locals():
+            path.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return {"asset_id": path.stem, "display_name": display_name}
+
+
+@app.post("/api/images/upload", status_code=201)
+async def upload_image(request: Request, filename: str = Query(min_length=1, max_length=512)) -> dict[str, str]:
+    try:
+        path, display_name = await save_uploaded_image(filename, request.stream())
     except (SourceImportError, ValueError, RuntimeError) as error:
         if "path" in locals():
             path.unlink(missing_ok=True)

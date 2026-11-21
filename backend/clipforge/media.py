@@ -57,6 +57,20 @@ def resolve_music_asset(asset_id: str) -> Path:
     return validate_audio_path(str(candidates[0]))
 
 
+def resolve_image_asset(asset_id: str) -> Path:
+    import re
+
+    if not re.fullmatch(r"[a-f0-9]{32}", asset_id):
+        raise ValueError("The selected image asset is invalid.")
+    directory = OUTPUT_DIR / "assets" / "images"
+    candidates = list(directory.glob(f"{asset_id}.*"))
+    if len(candidates) != 1 or candidates[0].suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
+        raise ValueError("The selected image is unavailable. Import it again.")
+    if not candidates[0].is_file() or candidates[0].stat().st_size == 0:
+        raise ValueError("The selected image is unavailable. Import it again.")
+    return candidates[0].resolve()
+
+
 def probe_video(path: Path) -> dict[str, Any]:
     executable = shutil.which("ffprobe")
     if not executable:

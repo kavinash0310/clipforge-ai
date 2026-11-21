@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Editing and local AI parts
+
+- Added adjustable minimum and maximum clip length settings from 15 to 45 seconds.
+- Added Fast and Deep analysis modes; Deep includes a low-resolution visual-motion signal in highlight ranking.
+- Added a broad transcription-language selector, Hinglish transcription output, and a lightweight Hindi-to-Latin transliteration helper.
+- Added rating-aware highlight scoring so repeated one-to-five-star feedback can gradually tune signal weights.
+- Added an AI Parts workflow that asks local Ollama for transcript-grounded 15–45 second ranges, validates each result against the source, falls back to ranked local highlights, and creates selected ranges as editable clips.
+- Added social-card templates, color/gradient/image backgrounds, logo overlays, creator credits, adjustable hook/outro timing, caption motion styles, and a music volume riser.
+- Added the editor's expanded styling panel for the same templates, background, logo, and credit controls available during clip creation.
+- Added exact transcript-range clip creation and image-asset upload validation for PNG, JPEG, and WebP files.
+- Updated the API guide, README, and user guide for the local editing and AI-parts features.
+- These newest additions have not been run through the project's automated tests or frontend build.
+
 ## Unreleased — Neon-inspired clip studio
 
 - Reworked the studio palette to orchid, hot pink, and cyan with brighter accents and matching editor surfaces.

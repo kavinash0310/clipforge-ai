@@ -17,8 +17,10 @@ from .config import OUTPUT_DIR
 
 MAX_SOURCE_BYTES = 20 * 1024 * 1024 * 1024
 MAX_MUSIC_BYTES = 200 * 1024 * 1024
+MAX_IMAGE_BYTES = 25 * 1024 * 1024
 VIDEO_EXTENSIONS = {".mp4", ".m4v", ".mkv", ".mov", ".avi", ".webm", ".mpeg", ".mpg"}
 AUDIO_EXTENSIONS = {".mp3", ".m4a", ".aac", ".wav", ".ogg", ".flac", ".opus"}
+IMAGE_SIGNATURES = {".png": (b"\x89PNG\r\n\x1a\n",), ".jpg": (b"\xff\xd8\xff",), ".jpeg": (b"\xff\xd8\xff",), ".webp": (b"RIFF",)}
 VIDEO_MIME_EXTENSIONS = {
     "video/mp4": ".mp4",
     "video/x-m4v": ".m4v",
@@ -116,6 +118,44 @@ async def save_uploaded_music(filename: str, chunks: AsyncIterable[bytes]) -> tu
         if isinstance(error, SourceImportError) or not isinstance(error, Exception):
             raise
         raise SourceImportError("The background music upload did not finish.") from error
+    return destination, safe_name
+
+
+async def save_uploaded_image(filename: str, chunks: AsyncIterable[bytes]) -> tuple[Path, str]:
+    safe_name = _safe_filename(filename)
+    suffix = Path(safe_name).suffix.lower()
+    if suffix not in IMAGE_SIGNATURES:
+        raise SourceImportError("Choose a PNG, JPG, JPEG, or WebP image.")
+    directory = OUTPUT_DIR / "assets" / "images"
+    directory.mkdir(parents=True, exist_ok=True)
+    destination = directory / f"{uuid4().hex}{suffix}"
+    partial = destination.with_suffix(destination.suffix + ".part")
+    size = 0
+    header = bytearray()
+    try:
+        with partial.open("wb") as output:
+            async for chunk in chunks:
+                if not chunk:
+                    continue
+                if len(header) < 16:
+                    header.extend(chunk[:16 - len(header)])
+                size += len(chunk)
+                if size > MAX_IMAGE_BYTES:
+                    raise SourceImportError("Logo and background images must be 25 MB or smaller.")
+                output.write(chunk)
+        if size == 0:
+            raise SourceImportError("The selected image is empty.")
+        if not any(bytes(header).startswith(signature) for signature in IMAGE_SIGNATURES[suffix]):
+            raise SourceImportError("The selected file does not match its image extension.")
+        if suffix == ".webp" and (len(header) < 12 or header[8:12] != b"WEBP"):
+            raise SourceImportError("The selected WebP file has an invalid header.")
+        os.replace(partial, destination)
+    except BaseException as error:
+        partial.unlink(missing_ok=True)
+        destination.unlink(missing_ok=True)
+        if isinstance(error, SourceImportError) or not isinstance(error, Exception):
+            raise
+        raise SourceImportError("The image upload did not finish.") from error
     return destination, safe_name
 
 

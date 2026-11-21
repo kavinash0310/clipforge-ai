@@ -318,6 +318,9 @@ def create_analysis_job(
     *,
     clip_count: int = 1,
     clip_duration_seconds: int = 30,
+    clip_min_seconds: int = 15,
+    clip_max_seconds: int = 45,
+    analysis_mode: str = "fast",
     moment_mix: str = "balanced",
     transcription_language: str = "auto",
     render_options: dict[str, Any] | None = None,
@@ -347,6 +350,9 @@ def create_analysis_job(
         payload = json.dumps({
             "clip_count": max(1, min(int(clip_count), 100)),
             "clip_duration_seconds": max(15, min(int(clip_duration_seconds), 45)),
+            "clip_min_seconds": max(15, min(int(clip_min_seconds), 45)),
+            "clip_max_seconds": max(15, min(int(clip_max_seconds), 45)),
+            "analysis_mode": analysis_mode if analysis_mode in {"fast", "deep"} else "fast",
             "moment_mix": moment_mix if moment_mix in {"balanced", "action", "dialogue"} else "balanced",
             "transcription_language": transcription_language,
             "render_options": render_options or {},
@@ -700,11 +706,27 @@ def set_clip_rating(clip_id: str, rating: int, database_path: Path | None = None
     return get_clip(clip_id, database_path)
 
 
+def get_clip_rating_examples(database_path: Path | None = None) -> list[dict[str, Any]]:
+    with database_session(database_path) as connection:
+        rows = connection.execute(
+            "SELECT user_rating, signals_json FROM clips WHERE user_rating IS NOT NULL ORDER BY created_at DESC LIMIT 500"
+        ).fetchall()
+    examples: list[dict[str, Any]] = []
+    for row in rows:
+        try:
+            signals = json.loads(row["signals_json"] or "{}")
+            examples.append({"rating": int(row["user_rating"]), "signals": signals if isinstance(signals, dict) else {}})
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+    return examples
+
+
 def create_transcript_clip(
     recording_id: str,
     timestamp_seconds: float,
     clip_duration_seconds: int,
     database_path: Path | None = None,
+    exact_range: tuple[float, float] | None = None,
 ) -> dict[str, Any] | None:
     timestamp = utc_now()
     with database_session(database_path) as connection:
@@ -727,9 +749,15 @@ def create_transcript_clip(
             raise ValueError("The recording is shorter than the minimum 15-second clip length.")
         if timestamp_seconds < 0 or timestamp_seconds > duration:
             raise ValueError("The selected transcript timestamp is outside the recording.")
-        clip_length = max(15, min(int(clip_duration_seconds), 45, int(duration)))
-        start = min(max(0.0, timestamp_seconds - min(6.0, clip_length * 0.2)), duration - clip_length)
-        end = start + clip_length
+        if exact_range is not None:
+            start, end = map(float, exact_range)
+            clip_length = end - start
+            if start < 0 or end > duration + 0.05 or clip_length < 15 or clip_length > 45:
+                raise ValueError("Choose a transcript range between 15 and 45 seconds inside the source video.")
+        else:
+            clip_length = max(15, min(int(clip_duration_seconds), 45, int(duration)))
+            start = min(max(0.0, timestamp_seconds - min(6.0, clip_length * 0.2)), duration - clip_length)
+            end = start + clip_length
         transcript_segments = json.loads(transcript["segments_json"])
         subtitles = []
         context = []
@@ -855,10 +883,13 @@ def create_render_job(
     options = render_options or {
         "aspect_ratio": "9:16", "format_preset": "youtube_shorts", "resolution": 1080, "frame_rate": "source",
         "gameplay_box": None, "facecam_box": None, "facecam_position": "top_right", "facecam_size_percent": 31,
-        "layout": "blur", "caption_style": "neon", "watermark_text": "",
-        "opening_hook": "", "outro_text": "", "caption_font": "Arial", "caption_size": 50,
+        "layout": "blur", "caption_style": "neon", "template": "none", "template_name": "", "template_handle": "",
+        "background_mode": "none", "background_color": "#181326", "background_color2": "#542558", "background_asset_id": None,
+        "background_name": "", "background_dim_percent": 22, "card_padding_percent": 14, "watermark_text": "",
+        "logo_asset_id": None, "logo_name": "", "logo_position": "top_right", "logo_size_percent": 16, "logo_opacity": 85, "credit_text": "",
+        "opening_hook": "", "opening_hook_seconds": 8, "outro_text": "", "outro_seconds": 3, "caption_font": "Arial", "caption_size": 50,
         "caption_text_color": "#FFFFFF", "caption_outline_color": "#351633", "caption_words_per_line": 5, "caption_animation": "static",
-        "music_asset_id": None, "music_name": "", "music_volume": 20, "music_fade_seconds": 1.5,
+        "music_asset_id": None, "music_name": "", "music_volume": 20, "music_peak_volume": 85, "music_riser_seconds": 4, "music_fade_seconds": 1.5,
     }
     with database_session(database_path) as connection:
         clip = connection.execute(
@@ -890,10 +921,13 @@ def create_render_job(
         current_options = rendered_metadata.get("settings") or {
             "aspect_ratio": "9:16", "format_preset": "youtube_shorts", "resolution": 1080, "frame_rate": "source",
             "gameplay_box": None, "facecam_box": None, "facecam_position": "top_right", "facecam_size_percent": 31,
-            "layout": "blur", "caption_style": "neon", "watermark_text": "",
-            "opening_hook": "", "outro_text": "", "caption_font": "Arial", "caption_size": 50,
+            "layout": "blur", "caption_style": "neon", "template": "none", "template_name": "", "template_handle": "",
+            "background_mode": "none", "background_color": "#181326", "background_color2": "#542558", "background_asset_id": None,
+            "background_name": "", "background_dim_percent": 22, "card_padding_percent": 14, "watermark_text": "",
+            "logo_asset_id": None, "logo_name": "", "logo_position": "top_right", "logo_size_percent": 16, "logo_opacity": 85, "credit_text": "",
+            "opening_hook": "", "opening_hook_seconds": 8, "outro_text": "", "outro_seconds": 3, "caption_font": "Arial", "caption_size": 50,
             "caption_text_color": "#FFFFFF", "caption_outline_color": "#351633", "caption_words_per_line": 5, "caption_animation": "static",
-            "music_asset_id": None, "music_name": "", "music_volume": 20, "music_fade_seconds": 1.5,
+            "music_asset_id": None, "music_name": "", "music_volume": 20, "music_peak_volume": 85, "music_riser_seconds": 4, "music_fade_seconds": 1.5,
         }
         if clip["status"] == "rendered" and clip["file_path"] and Path(clip["file_path"]).is_file() and current_options == options:
             return {"id": None, "clip_id": clip_id, "status": "rendered", "existing": True}

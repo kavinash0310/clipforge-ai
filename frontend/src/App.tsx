@@ -35,8 +35,24 @@ import {
   Zap,
 } from "lucide-react";
 
+const TRANSCRIPTION_LANGUAGE_OPTIONS = [
+  ["auto", "Auto detect"], ["hinglish", "Hinglish · Hindi in English letters"], ["hi", "Hindi · हिंदी"], ["en", "English"],
+  ["ur", "Urdu · اردو"], ["bn", "Bengali · বাংলা"], ["ta", "Tamil · தமிழ்"], ["te", "Telugu · తెలుగు"], ["mr", "Marathi · मराठी"],
+  ["gu", "Gujarati · ગુજરાતી"], ["kn", "Kannada · ಕನ್ನಡ"], ["ml", "Malayalam · മലയാളം"], ["pa", "Punjabi · ਪੰਜਾਬੀ"],
+  ["ne", "Nepali · नेपाली"], ["si", "Sinhala · සිංහල"], ["ar", "Arabic · العربية"], ["fa", "Persian · فارسی"],
+  ["he", "Hebrew · עברית"], ["tr", "Turkish · Türkçe"], ["ru", "Russian · Русский"], ["uk", "Ukrainian · Українська"],
+  ["pl", "Polish · Polski"], ["cs", "Czech · Čeština"], ["sk", "Slovak · Slovenčina"], ["hu", "Hungarian · Magyar"],
+  ["ro", "Romanian · Română"], ["bg", "Bulgarian · Български"], ["sr", "Serbian · Српски"], ["hr", "Croatian · Hrvatski"],
+  ["el", "Greek · Ελληνικά"], ["de", "German · Deutsch"], ["fr", "French · Français"], ["es", "Spanish · Español"],
+  ["pt", "Portuguese · Português"], ["it", "Italian · Italiano"], ["nl", "Dutch · Nederlands"], ["ca", "Catalan · Català"],
+  ["sv", "Swedish · Svenska"], ["da", "Danish · Dansk"], ["no", "Norwegian · Norsk"], ["fi", "Finnish · Suomi"],
+  ["is", "Icelandic · Íslenska"], ["id", "Indonesian · Bahasa Indonesia"], ["ms", "Malay · Bahasa Melayu"],
+  ["tl", "Filipino · Tagalog"], ["vi", "Vietnamese · Tiếng Việt"], ["th", "Thai · ไทย"], ["zh", "Chinese · 中文"],
+  ["ja", "Japanese · 日本語"], ["ko", "Korean · 한국어"], ["sw", "Swahili · Kiswahili"], ["af", "Afrikaans"],
+  ["am", "Amharic · አማርኛ"], ["az", "Azerbaijani · Azərbaycan"],
+] as const;
+type TranscriptionLanguage = typeof TRANSCRIPTION_LANGUAGE_OPTIONS[number][0];
 type Page = "overview" | "media" | "clips" | "youtube" | "live" | "settings";
-type TranscriptionLanguage = "auto" | "en" | "hi" | "es" | "fr" | "de" | "pt" | "ja" | "ko" | "zh" | "it" | "ru" | "ar";
 type Job = {
   id: string;
   job_type: string;
@@ -116,32 +132,53 @@ type SubtitleSegment = { start: number; end: number; text: string };
 type FrameRegion = { x: number; y: number; width: number; height: number };
 type FrameRegionKey = "gameplay_box" | "facecam_box";
 type SourceViewport = { left: number; top: number; width: number; height: number; stageWidth: number; stageHeight: number };
+type FramingPreset = { name: string; layout: RenderOptions["layout"]; gameplay_box: FrameRegion | null; facecam_box: FrameRegion | null; facecam_position: RenderOptions["facecam_position"]; facecam_size_percent: number };
 type RenderOptions = {
   aspect_ratio: "9:16" | "1:1" | "4:5" | "16:9";
   format_preset: "youtube_shorts" | "tiktok" | "instagram_reels" | "instagram_portrait" | "square" | "landscape" | "custom";
   resolution: 720 | 1080 | 2160;
   frame_rate: "source" | 24 | 30 | 60;
-  layout: "blur" | "blur_top" | "blur_bottom" | "fit" | "fill" | "fill_top" | "fill_bottom" | "gameplay_only" | "facecam_overlay" | "camera_top" | "camera_bottom" | "side_by_side";
+  layout: "blur" | "blur_top" | "blur_bottom" | "fit" | "fill" | "fill_top" | "fill_bottom" | "gameplay_only" | "facecam_overlay" | "facecam_circle" | "camera_top" | "camera_bottom" | "side_by_side" | "no_facecam";
   gameplay_box: FrameRegion | null;
   facecam_box: FrameRegion | null;
   facecam_position: "top_left" | "top_right" | "bottom_left" | "bottom_right" | "bottom_center";
   facecam_size_percent: number;
   caption_style: "neon" | "impact" | "clean" | "hormozi" | "mrbeast";
+  template: "none" | "x_light" | "x_dark" | "tiktok_hook" | "breaking_news";
+  template_name: string;
+  template_handle: string;
+  background_mode: "none" | "blur" | "color" | "gradient" | "image";
+  background_color: string;
+  background_color2: string;
+  background_asset_id: string | null;
+  background_name: string;
+  background_dim_percent: number;
+  card_padding_percent: number;
   watermark_text: string;
+  logo_asset_id: string | null;
+  logo_name: string;
+  logo_position: "top_left" | "top_right" | "bottom_left" | "bottom_right";
+  logo_size_percent: number;
+  logo_opacity: number;
+  credit_text: string;
   opening_hook: string;
+  opening_hook_seconds: number;
   outro_text: string;
+  outro_seconds: number;
   caption_font: "Arial" | "Impact" | "Tahoma" | "Verdana";
   caption_size: number;
   caption_text_color: string;
   caption_outline_color: string;
   caption_words_per_line: number;
-  caption_animation: "static" | "word_highlight";
+  caption_animation: "static" | "word_highlight" | "pop_in" | "pop_in_line" | "one_by_one" | "build_up";
   music_asset_id: string | null;
   music_name: string;
   music_volume: number;
+  music_peak_volume: number;
+  music_riser_seconds: number;
   music_fade_seconds: number;
 };
-const defaultRenderOptions: RenderOptions = { aspect_ratio: "9:16", format_preset: "youtube_shorts", resolution: 1080, frame_rate: "source", layout: "blur", gameplay_box: null, facecam_box: null, facecam_position: "top_right", facecam_size_percent: 31, caption_style: "neon", watermark_text: "", opening_hook: "", outro_text: "", caption_font: "Arial", caption_size: 50, caption_text_color: "#FFFFFF", caption_outline_color: "#351633", caption_words_per_line: 5, caption_animation: "static", music_asset_id: null, music_name: "", music_volume: 20, music_fade_seconds: 1.5 };
+const defaultRenderOptions: RenderOptions = { aspect_ratio: "9:16", format_preset: "youtube_shorts", resolution: 1080, frame_rate: "source", layout: "blur", gameplay_box: null, facecam_box: null, facecam_position: "top_right", facecam_size_percent: 31, caption_style: "neon", template: "none", template_name: "", template_handle: "", background_mode: "none", background_color: "#181326", background_color2: "#542558", background_asset_id: null, background_name: "", background_dim_percent: 22, card_padding_percent: 14, watermark_text: "", logo_asset_id: null, logo_name: "", logo_position: "top_right", logo_size_percent: 16, logo_opacity: 85, credit_text: "", opening_hook: "", opening_hook_seconds: 8, outro_text: "", outro_seconds: 3, caption_font: "Arial", caption_size: 50, caption_text_color: "#FFFFFF", caption_outline_color: "#351633", caption_words_per_line: 5, caption_animation: "static", music_asset_id: null, music_name: "", music_volume: 20, music_peak_volume: 85, music_riser_seconds: 4, music_fade_seconds: 1.5 };
 type MetadataTone = "hype" | "funny" | "clean" | "competitive";
 type ClipMetadataForm = {
   game_name: string;
@@ -247,6 +284,13 @@ type RecordingAnalysis = {
     rendered_at: string | null;
     status: string;
   }>;
+};
+type AIPartSuggestion = {
+  id: string;
+  title: string;
+  start_seconds: number;
+  end_seconds: number;
+  reason: string;
 };
 
 const navItems = [
@@ -606,6 +650,9 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
   const [authorized, setAuthorized] = useState(false);
   const [clipCount, setClipCount] = useState(1);
   const [clipDuration, setClipDuration] = useState(30);
+  const [clipMinDuration, setClipMinDuration] = useState(15);
+  const [clipMaxDuration, setClipMaxDuration] = useState(45);
+  const [analysisMode, setAnalysisMode] = useState<"fast" | "deep">("fast");
   const [momentMix, setMomentMix] = useState<"balanced" | "action" | "dialogue">("balanced");
   const [focusPrompt, setFocusPrompt] = useState("");
   const [transcriptionLanguage, setTranscriptionLanguage] = useState<TranscriptionLanguage>("auto");
@@ -614,6 +661,12 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
   const [pageError, setPageError] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<RecordingAnalysis | null>(null);
   const [transcriptQuery, setTranscriptQuery] = useState("");
+  const [aiPartCount, setAiPartCount] = useState(5);
+  const [aiParts, setAiParts] = useState<AIPartSuggestion[]>([]);
+  const [selectedAiPartIds, setSelectedAiPartIds] = useState<string[]>([]);
+  const [aiPartsProvider, setAiPartsProvider] = useState<string | null>(null);
+  const [aiPartsNote, setAiPartsNote] = useState<string | null>(null);
+  const [aiPartsBusy, setAiPartsBusy] = useState(false);
   const [selectedAnalysisId, setSelectedAnalysisId] = useState<string | null>(null);
   const [analyzingId, setAnalyzingId] = useState<string | null>(null);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
@@ -623,6 +676,10 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
   const [frameRegionMode, setFrameRegionMode] = useState<FrameRegionKey | null>(null);
   const [frameBoxDraft, setFrameBoxDraft] = useState<{ key: FrameRegionKey; box: FrameRegion } | null>(null);
   const [sourceViewport, setSourceViewport] = useState<SourceViewport | null>(null);
+  const [framingPresets, setFramingPresets] = useState<FramingPreset[]>([]);
+  const [framingPresetName, setFramingPresetName] = useState("");
+  const [framingPresetSelection, setFramingPresetSelection] = useState("");
+  const [imageUploadTarget, setImageUploadTarget] = useState<"logo" | "background">("logo");
   const [clipBusy, setClipBusy] = useState(false);
   const [metadata, setMetadata] = useState<ClipMetadata | null>(null);
   const [metadataForm, setMetadataForm] = useState<ClipMetadataForm>({ game_name: "", tone: "hype", title: "", description: "", hashtags: [], tags: [] });
@@ -632,6 +689,7 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
   const captionFileRef = useRef<HTMLInputElement>(null);
   const musicFileRef = useRef<HTMLInputElement>(null);
   const creationMusicFileRef = useRef<HTMLInputElement>(null);
+  const imageFileRef = useRef<HTMLInputElement>(null);
   const sourcePreviewRef = useRef<HTMLVideoElement>(null);
   const frameBoxStartRef = useRef<{ x: number; y: number } | null>(null);
 
@@ -682,6 +740,38 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
   }, [updateSourceViewport]);
 
   useEffect(() => {
+    try {
+      const saved = JSON.parse(window.localStorage.getItem("clipforge-framing-presets") || "[]") as unknown;
+      if (Array.isArray(saved)) {
+        const layouts: RenderOptions["layout"][] = ["blur", "blur_top", "blur_bottom", "fit", "fill", "fill_top", "fill_bottom", "gameplay_only", "facecam_overlay", "facecam_circle", "camera_top", "camera_bottom", "side_by_side", "no_facecam"];
+        const safeBox = (box: unknown): box is FrameRegion => {
+          if (!box || typeof box !== "object") return false;
+          const candidate = box as FrameRegion;
+          return [candidate.x, candidate.y, candidate.width, candidate.height].every(Number.isFinite)
+            && candidate.x >= 0 && candidate.y >= 0 && candidate.width >= 0.04 && candidate.height >= 0.04
+            && candidate.x + candidate.width <= 1.000001 && candidate.y + candidate.height <= 1.000001;
+        };
+        const allowedPositions: RenderOptions["facecam_position"][] = ["top_left", "top_right", "bottom_left", "bottom_right", "bottom_center"];
+        setFramingPresets(saved.flatMap((item): FramingPreset[] => {
+          if (!item || typeof item !== "object") return [];
+          const preset = item as Partial<FramingPreset>;
+          if (typeof preset.name !== "string" || !preset.name.trim() || !layouts.includes(preset.layout as RenderOptions["layout"])) return [];
+          return [{
+            name: preset.name.slice(0, 40),
+            layout: preset.layout as RenderOptions["layout"],
+            gameplay_box: safeBox(preset.gameplay_box) ? preset.gameplay_box : null,
+            facecam_box: safeBox(preset.facecam_box) ? preset.facecam_box : null,
+            facecam_position: allowedPositions.includes(preset.facecam_position as RenderOptions["facecam_position"]) ? preset.facecam_position as RenderOptions["facecam_position"] : "top_right",
+            facecam_size_percent: Number.isFinite(preset.facecam_size_percent) ? Math.max(16, Math.min(50, Number(preset.facecam_size_percent))) : 31,
+          }];
+        }));
+      }
+    } catch {
+      setFramingPresets([]);
+    }
+  }, []);
+
+  useEffect(() => {
     if (!selectedClipId) {
       setMetadata(null);
       return;
@@ -727,7 +817,7 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
     setMessage(null);
     setPageError(null);
     try {
-      const clipOptions = { authorized, auto_analyze: true, clip_count: clipCount, clip_duration_seconds: clipDuration, moment_mix: momentMix, transcription_language: transcriptionLanguage, render_options: renderOptions, focus_prompt: focusPrompt };
+      const clipOptions = { authorized, auto_analyze: true, clip_count: clipCount, clip_duration_seconds: clipDuration, clip_min_seconds: clipMinDuration, clip_max_seconds: clipMaxDuration, analysis_mode: analysisMode, moment_mix: momentMix, transcription_language: transcriptionLanguage, render_options: renderOptions, focus_prompt: focusPrompt };
       let result: { recording_id: string; job_id: string; display_name: string };
       if (sourceMode === "upload") {
         if (!selectedFile) throw new Error("Choose a video file first.");
@@ -737,6 +827,9 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
           auto_analyze: "true",
           clip_count: String(clipCount),
           clip_duration_seconds: String(clipDuration),
+          clip_min_seconds: String(clipMinDuration),
+          clip_max_seconds: String(clipMaxDuration),
+          analysis_mode: analysisMode,
           moment_mix: momentMix,
           transcription_language: transcriptionLanguage,
           render_options: JSON.stringify(renderOptions),
@@ -794,7 +887,7 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
     try {
       const result = await api<{ id: string; existing: boolean }>(`/api/recordings/${encodeURIComponent(recording.id)}/analyze`, {
         method: "POST",
-        body: JSON.stringify({ clip_count: clipCount, clip_duration_seconds: clipDuration, moment_mix: momentMix, transcription_language: transcriptionLanguage, render_options: renderOptions, focus_prompt: focusPrompt }),
+        body: JSON.stringify({ clip_count: clipCount, clip_duration_seconds: clipDuration, clip_min_seconds: clipMinDuration, clip_max_seconds: clipMaxDuration, analysis_mode: analysisMode, moment_mix: momentMix, transcription_language: transcriptionLanguage, render_options: renderOptions, focus_prompt: focusPrompt }),
       });
       setMessage(result.existing ? "This recording is already in the analysis queue." : `ClipForge is looking for up to ${clipCount} ${momentMix} moments from ${recording.display_name}. It will caption, render, and draft metadata for each result.`);
       setSelectedAnalysisId(null);
@@ -812,6 +905,9 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
     setSelectedAnalysisId(recordingId);
     setSelectedClipId(null);
     setAnalysis(null);
+    setAiParts([]);
+    setSelectedAiPartIds([]);
+    setAiPartsNote(null);
     setPageError(null);
     try {
       setAnalysis(await api<RecordingAnalysis>(`/api/recordings/${encodeURIComponent(recordingId)}/analysis`));
@@ -911,13 +1007,51 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
   const clearFrameRegion = (key: FrameRegionKey) => {
     setRenderOptions((options) => {
       const nextLayout = (key === "gameplay_box" && options.layout === "gameplay_only")
-        || (key === "facecam_box" && ["facecam_overlay", "camera_top", "camera_bottom", "side_by_side"].includes(options.layout))
+        || (key === "facecam_box" && ["facecam_overlay", "facecam_circle", "camera_top", "camera_bottom", "side_by_side"].includes(options.layout))
         ? "blur"
         : options.layout;
       return key === "gameplay_box"
         ? { ...options, gameplay_box: null, layout: nextLayout as RenderOptions["layout"] }
         : { ...options, facecam_box: null, layout: nextLayout as RenderOptions["layout"] };
     });
+  };
+
+  const saveFramingPreset = () => {
+    const name = framingPresetName.trim();
+    if (!name) {
+      setPageError("Name this framing preset before saving it.");
+      return;
+    }
+    const preset: FramingPreset = {
+      name: name.slice(0, 40),
+      layout: renderOptions.layout,
+      gameplay_box: renderOptions.gameplay_box,
+      facecam_box: renderOptions.facecam_box,
+      facecam_position: renderOptions.facecam_position,
+      facecam_size_percent: renderOptions.facecam_size_percent,
+    };
+    const next = [...framingPresets.filter((item) => item.name.toLowerCase() !== preset.name.toLowerCase()), preset].slice(-20);
+    window.localStorage.setItem("clipforge-framing-presets", JSON.stringify(next));
+    setFramingPresets(next);
+    setFramingPresetSelection(preset.name);
+    setFramingPresetName("");
+    setMessage(`Saved framing preset “${preset.name}” on this device.`);
+    setPageError(null);
+  };
+
+  const loadFramingPreset = () => {
+    const preset = framingPresets.find((item) => item.name === framingPresetSelection);
+    if (!preset) return;
+    setRenderOptions((options) => ({
+      ...options,
+      layout: preset.layout,
+      gameplay_box: preset.gameplay_box,
+      facecam_box: preset.facecam_box,
+      facecam_position: preset.facecam_position,
+      facecam_size_percent: preset.facecam_size_percent,
+    }));
+    setMessage(`Loaded framing preset “${preset.name}”.`);
+    setPageError(null);
   };
 
   const editClip = (clip: Clip | RecordingAnalysis["candidates"][number]) => {
@@ -1160,6 +1294,29 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
     }
   };
 
+  const importImageFile = async (file: File | undefined) => {
+    if (!file) return;
+    setClipBusy(true);
+    setPageError(null);
+    try {
+      const query = new URLSearchParams({ filename: file.name });
+      const asset = await api<{ asset_id: string; display_name: string }>(`/api/images/upload?${query.toString()}`, {
+        method: "POST",
+        headers: { "Content-Type": file.type || "application/octet-stream" },
+        body: file,
+      });
+      setRenderOptions((options) => imageUploadTarget === "logo"
+        ? { ...options, logo_asset_id: asset.asset_id, logo_name: asset.display_name }
+        : { ...options, background_asset_id: asset.asset_id, background_name: asset.display_name, background_mode: "image" });
+      setMessage(`${asset.display_name} added as the ${imageUploadTarget === "logo" ? "logo" : "background image"}.`);
+    } catch (reason) {
+      setPageError(reason instanceof Error ? reason.message : "The image could not be imported.");
+    } finally {
+      setClipBusy(false);
+      if (imageFileRef.current) imageFileRef.current.value = "";
+    }
+  };
+
   const renderClip = async () => {
     if (!selectedClip) return;
     setClipBusy(true);
@@ -1221,6 +1378,63 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
     }
   };
 
+  const suggestAiParts = async () => {
+    if (!selectedAnalysisId) return;
+    setAiPartsBusy(true);
+    setPageError(null);
+    setAiPartsNote(null);
+    try {
+      const result = await api<{ parts: AIPartSuggestion[]; provider: string; model_name: string | null; note: string }>(
+        `/api/recordings/${encodeURIComponent(selectedAnalysisId)}/ai-parts`,
+        { method: "POST", body: JSON.stringify({ count: aiPartCount, focus_prompt: focusPrompt }) },
+      );
+      setAiParts(result.parts);
+      setSelectedAiPartIds(result.parts.map((part) => part.id));
+      setAiPartsProvider(result.model_name ? `${result.provider} · ${result.model_name}` : result.provider.replaceAll("_", " "));
+      setAiPartsNote(result.note);
+      if (!result.parts.length) setMessage("No 15–45 second parts were available. Run Find clips or check the local AI model in Settings.");
+    } catch (reason) {
+      setPageError(reason instanceof Error ? reason.message : "AI could not suggest transcript parts.");
+    } finally {
+      setAiPartsBusy(false);
+    }
+  };
+
+  const createSelectedAiParts = async () => {
+    if (!selectedAnalysisId) return;
+    const selectedParts = aiParts.filter((part) => selectedAiPartIds.includes(part.id));
+    if (!selectedParts.length) return;
+    setClipBusy(true);
+    setPageError(null);
+    const created: Clip[] = [];
+    try {
+      for (let index = 0; index < selectedParts.length; index += 1) {
+        const part = selectedParts[index];
+        setMessage(`Creating selected parts · ${index + 1} of ${selectedParts.length}`);
+        const clip = await api<Clip>(`/api/recordings/${encodeURIComponent(selectedAnalysisId)}/clips/from-range`, {
+          method: "POST",
+          body: JSON.stringify({ start_seconds: part.start_seconds, end_seconds: part.end_seconds }),
+        });
+        created.push(clip);
+      }
+      const last = created[created.length - 1];
+      if (last) {
+        setSelectedClipId(last.id);
+        setCaptionDraft(last.subtitles.map((segment) => ({ ...segment })));
+        setTrimDraft({ start_seconds: last.start_seconds, end_seconds: last.end_seconds });
+        setRenderOptions(defaultRenderOptions);
+      }
+      await refresh();
+      setMessage(`${created.length} selected ${created.length === 1 ? "part is" : "parts are"} ready in My clips. The last part is open in the editor.`);
+      window.setTimeout(() => document.getElementById("clip-editor")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+    } catch (reason) {
+      await refresh();
+      setPageError(reason instanceof Error ? reason.message : "The selected transcript parts could not be created.");
+    } finally {
+      setClipBusy(false);
+    }
+  };
+
   const visibleTranscriptSegments = (analysis?.transcript?.segments ?? []).map((segment, index) => ({ segment, index }))
     .filter(({ segment }) => !transcriptQuery.trim() || segment.text.toLowerCase().includes(transcriptQuery.trim().toLowerCase()));
 
@@ -1275,7 +1489,9 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
           <div className="clip-plan-copy"><div className="section-overline">02 &nbsp;·&nbsp; MAKE IT YOUR FORMAT</div><h3>Choose the output</h3><p>Pick a platform shape and quality for every clip in this batch.</p></div>
           <div className="clip-plan-fields">
             <label>Number of clips<input type="number" min={1} max={100} value={clipCount} onChange={(event) => setClipCount(Math.max(1, Math.min(100, Number(event.target.value) || 1)))} /></label>
-            <label>Clip duration<select value={clipDuration} onChange={(event) => setClipDuration(Number(event.target.value))}><option value={15}>15 seconds</option><option value={30}>30 seconds</option><option value={45}>45 seconds</option></select></label>
+            <label>Minimum length (sec)<input type="number" min={15} max={45} value={clipMinDuration} onChange={(event) => { const next = Math.max(15, Math.min(45, Number(event.target.value) || 15)); setClipMinDuration(next); setClipMaxDuration((current) => Math.max(current, next)); }} /></label>
+            <label>Maximum length (sec)<input type="number" min={clipMinDuration} max={45} value={clipMaxDuration} onChange={(event) => setClipMaxDuration(Math.max(clipMinDuration, Math.min(45, Number(event.target.value) || clipMinDuration)))} /></label>
+            <label>Analysis mode<select value={analysisMode} onChange={(event) => setAnalysisMode(event.target.value as "fast" | "deep")}><option value="fast">Fast · audio and transcript</option><option value="deep">Deep · include visual motion scan</option></select></label>
             <label>Platform format<select value={renderOptions.format_preset} onChange={(event) => { const preset = event.target.value as RenderOptions["format_preset"]; const ratios: Record<RenderOptions["format_preset"], RenderOptions["aspect_ratio"]> = { youtube_shorts: "9:16", tiktok: "9:16", instagram_reels: "9:16", instagram_portrait: "4:5", square: "1:1", landscape: "16:9", custom: renderOptions.aspect_ratio }; setRenderOptions((options) => ({ ...options, format_preset: preset, aspect_ratio: ratios[preset] })); }}><option value="youtube_shorts">YouTube Shorts · 9:16</option><option value="tiktok">TikTok · 9:16</option><option value="instagram_reels">Instagram Reels · 9:16</option><option value="instagram_portrait">Instagram portrait · 4:5</option><option value="square">Square · 1:1</option><option value="landscape">Landscape · 16:9</option><option value="custom">Custom frame</option></select></label>
             <label>Export resolution<select value={renderOptions.resolution} onChange={(event) => setRenderOptions((options) => ({ ...options, resolution: Number(event.target.value) as RenderOptions["resolution"] }))}><option value={720}>720p</option><option value={1080}>1080p</option><option value={2160}>4K</option></select></label>
             <label>Frame rate<select value={renderOptions.frame_rate} onChange={(event) => setRenderOptions((options) => ({ ...options, frame_rate: event.target.value === "source" ? "source" : Number(event.target.value) as 24 | 30 | 60 }))}><option value="source">Keep source</option><option value={24}>24 fps</option><option value={30}>30 fps</option><option value={60}>60 fps</option></select></label>
@@ -1294,9 +1510,9 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
         <section className="surface-card clip-plan-card workflow-step-card">
           <div className="clip-plan-copy"><div className="section-overline">04 &nbsp;·&nbsp; GIVE IT A VOICE</div><h3>Choose captions and language</h3><p>Set the speech language and a caption look before the batch starts rendering.</p></div>
           <div className="clip-plan-fields">
-            <label>Speech language<select value={transcriptionLanguage} onChange={(event) => setTranscriptionLanguage(event.target.value as TranscriptionLanguage)}><option value="auto">Auto detect</option><option value="en">English</option><option value="hi">Hindi</option><option value="es">Spanish</option><option value="fr">French</option><option value="de">German</option><option value="pt">Portuguese</option><option value="ja">Japanese</option><option value="ko">Korean</option><option value="zh">Chinese</option><option value="it">Italian</option><option value="ru">Russian</option><option value="ar">Arabic</option></select></label>
+            <label>Speech language<select value={transcriptionLanguage} onChange={(event) => setTranscriptionLanguage(event.target.value as TranscriptionLanguage)}>{TRANSCRIPTION_LANGUAGE_OPTIONS.map(([code, label]) => <option key={code} value={code}>{label}</option>)}</select></label>
             <label>Caption style<select value={renderOptions.caption_style} onChange={(event) => { const style = event.target.value as RenderOptions["caption_style"]; setRenderOptions((options) => ({ ...options, caption_style: style, caption_font: style === "impact" ? "Impact" : "Arial" })); }}><option value="neon">Neon pop</option><option value="impact">Impact</option><option value="clean">Clean</option><option value="hormozi">Bold emphasis</option><option value="mrbeast">Creator punch</option></select></label>
-            <label>Caption motion<select value={renderOptions.caption_animation} onChange={(event) => setRenderOptions((options) => ({ ...options, caption_animation: event.target.value as RenderOptions["caption_animation"] }))}><option value="static">Static lines</option><option value="word_highlight">Word highlight</option></select></label>
+            <label>Caption motion<select value={renderOptions.caption_animation} onChange={(event) => setRenderOptions((options) => ({ ...options, caption_animation: event.target.value as RenderOptions["caption_animation"] }))}><option value="word_highlight">Word highlight</option><option value="pop_in">Pop-in words</option><option value="pop_in_line">Pop-in line</option><option value="one_by_one">One word at a time</option><option value="build_up">Build the line</option><option value="static">Full line</option></select></label>
           </div>
         </section>
 
@@ -1304,15 +1520,30 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
           <div className="clip-plan-copy"><div className="section-overline">05 &nbsp;·&nbsp; STYLE & EXTRAS · NEW</div><h3>Add your finishing touches</h3><p>Optional hook, outro, creator mark, and music bed. These choices will be applied to each clip in the batch.</p></div>
           <div className="clip-plan-fields extras-fields">
             <label>Opening hook<input maxLength={100} value={renderOptions.opening_hook} onChange={(event) => setRenderOptions((options) => ({ ...options, opening_hook: event.target.value }))} placeholder="Optional opening line" /></label>
+            <label>Hook duration (sec)<input type="number" min={2} max={60} value={renderOptions.opening_hook_seconds} onChange={(event) => setRenderOptions((options) => ({ ...options, opening_hook_seconds: Math.max(2, Math.min(60, Number(event.target.value) || 2)) }))} /></label>
             <label>Outro ribbon<input maxLength={100} value={renderOptions.outro_text} onChange={(event) => setRenderOptions((options) => ({ ...options, outro_text: event.target.value }))} placeholder="Optional closing line" /></label>
+            <label>Outro duration (sec)<input type="number" min={1.5} max={8} step={0.5} value={renderOptions.outro_seconds} onChange={(event) => setRenderOptions((options) => ({ ...options, outro_seconds: Math.max(1.5, Math.min(8, Number(event.target.value) || 1.5)) }))} /></label>
             <label>Creator watermark<input maxLength={60} value={renderOptions.watermark_text} onChange={(event) => setRenderOptions((options) => ({ ...options, watermark_text: event.target.value }))} placeholder="Name or @handle" /></label>
+            <label>Social template<select value={renderOptions.template} onChange={(event) => setRenderOptions((options) => ({ ...options, template: event.target.value as RenderOptions["template"] }))}><option value="none">None</option><option value="x_light">Post card · light</option><option value="x_dark">Post card · dark</option><option value="tiktok_hook">Shorts hook card</option><option value="breaking_news">Breaking news</option></select></label>
+            {renderOptions.template !== "none" && <><label>Card title<input maxLength={60} value={renderOptions.template_name} onChange={(event) => setRenderOptions((options) => ({ ...options, template_name: event.target.value }))} placeholder="Name or hook" /></label><label>Card handle<input maxLength={60} value={renderOptions.template_handle} onChange={(event) => setRenderOptions((options) => ({ ...options, template_handle: event.target.value }))} placeholder="@handle" /></label></>}
+            <label>Background<select value={renderOptions.background_mode} onChange={(event) => setRenderOptions((options) => ({ ...options, background_mode: event.target.value as RenderOptions["background_mode"] }))}><option value="none">None</option><option value="blur">Blurred source</option><option value="color">Solid color</option><option value="gradient">Two-color gradient</option><option value="image" disabled={!renderOptions.background_asset_id}>My image</option></select></label>
+            {["color", "gradient"].includes(renderOptions.background_mode) && <><label>Background color<input type="color" value={renderOptions.background_color} onChange={(event) => setRenderOptions((options) => ({ ...options, background_color: event.target.value.toUpperCase() }))} /></label>{renderOptions.background_mode === "gradient" && <label>Second color<input type="color" value={renderOptions.background_color2} onChange={(event) => setRenderOptions((options) => ({ ...options, background_color2: event.target.value.toUpperCase() }))} /></label>}</>}
+            <label>Background image<div className="asset-choice"><span>{renderOptions.background_name || "No image selected"}</span><button type="button" className="row-action-button" disabled={clipBusy} onClick={() => { setImageUploadTarget("background"); imageFileRef.current?.click(); }}><Upload size={12} />Choose</button>{renderOptions.background_asset_id && <button type="button" className="icon-button" aria-label="Remove background image" onClick={() => setRenderOptions((options) => ({ ...options, background_asset_id: null, background_name: "", background_mode: options.background_mode === "image" ? "none" : options.background_mode }))}>×</button>}</div></label>
+            <label>Background dim<input type="range" min={0} max={80} value={renderOptions.background_dim_percent} onChange={(event) => setRenderOptions((options) => ({ ...options, background_dim_percent: Number(event.target.value) }))} /><small>{renderOptions.background_dim_percent}%</small></label>
+            <label>Card padding<input type="range" min={0} max={30} value={renderOptions.card_padding_percent} onChange={(event) => setRenderOptions((options) => ({ ...options, card_padding_percent: Number(event.target.value) }))} /><small>{renderOptions.card_padding_percent}%</small></label>
+            <label>Logo / watermark image<div className="asset-choice"><span>{renderOptions.logo_name || "No image selected"}</span><button type="button" className="row-action-button" disabled={clipBusy} onClick={() => { setImageUploadTarget("logo"); imageFileRef.current?.click(); }}><Upload size={12} />Choose</button>{renderOptions.logo_asset_id && <button type="button" className="icon-button" aria-label="Remove logo image" onClick={() => setRenderOptions((options) => ({ ...options, logo_asset_id: null, logo_name: "" }))}>×</button>}</div></label>
+            {renderOptions.logo_asset_id && <><label>Logo position<select value={renderOptions.logo_position} onChange={(event) => setRenderOptions((options) => ({ ...options, logo_position: event.target.value as RenderOptions["logo_position"] }))}><option value="top_left">Top left</option><option value="top_right">Top right</option><option value="bottom_left">Bottom left</option><option value="bottom_right">Bottom right</option></select></label><label>Logo size<input type="range" min={5} max={35} value={renderOptions.logo_size_percent} onChange={(event) => setRenderOptions((options) => ({ ...options, logo_size_percent: Number(event.target.value) }))} /><small>{renderOptions.logo_size_percent}% of frame width</small></label><label>Logo opacity<input type="range" min={10} max={100} value={renderOptions.logo_opacity} onChange={(event) => setRenderOptions((options) => ({ ...options, logo_opacity: Number(event.target.value) }))} /><small>{renderOptions.logo_opacity}%</small></label></>}
+            <label>Credit line<input maxLength={100} value={renderOptions.credit_text} onChange={(event) => setRenderOptions((options) => ({ ...options, credit_text: event.target.value }))} placeholder="Optional credit" /></label>
           </div>
+          <input ref={imageFileRef} className="sr-only" type="file" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" onChange={(event) => void importImageFile(event.target.files?.[0])} />
           <input ref={creationMusicFileRef} className="sr-only" type="file" accept="audio/*,.mp3,.m4a,.aac,.wav,.ogg,.flac,.opus" onChange={(event) => void importMusicFile(event.target.files?.[0])} />
           <div className="music-bed-controls">
             <div><strong>Music bed</strong><span>{renderOptions.music_name || "Optional local audio track"}</span></div>
             <button className="secondary-button" disabled={clipBusy} onClick={() => creationMusicFileRef.current?.click()}><Upload size={12} />Choose audio</button>
             {renderOptions.music_asset_id && <button className="icon-button" aria-label="Remove music bed" title="Remove music bed" onClick={() => setRenderOptions((options) => ({ ...options, music_asset_id: null, music_name: "" }))}>×</button>}
             <label>Volume<input type="range" min={0} max={100} value={renderOptions.music_volume} disabled={!renderOptions.music_asset_id} onChange={(event) => setRenderOptions((options) => ({ ...options, music_volume: Number(event.target.value) }))} /><small>{renderOptions.music_volume}%</small></label>
+            <label>Peak volume<input type="range" min={0} max={100} value={renderOptions.music_peak_volume} disabled={!renderOptions.music_asset_id} onChange={(event) => setRenderOptions((options) => ({ ...options, music_peak_volume: Number(event.target.value) }))} /><small>{renderOptions.music_peak_volume}%</small></label>
+            <label>Riser seconds<input type="number" min={1} max={15} value={renderOptions.music_riser_seconds} disabled={!renderOptions.music_asset_id} onChange={(event) => setRenderOptions((options) => ({ ...options, music_riser_seconds: Math.max(1, Math.min(15, Number(event.target.value) || 1)) }))} /><small>seconds</small></label>
             <label>Fade<input type="number" min={0} max={5} step={0.5} value={renderOptions.music_fade_seconds} disabled={!renderOptions.music_asset_id} onChange={(event) => setRenderOptions((options) => ({ ...options, music_fade_seconds: Math.max(0, Math.min(5, Number(event.target.value) || 0)) }))} /><small>sec</small></label>
           </div>
         </section>
@@ -1363,6 +1594,16 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
             {selectedClip && selectedClip.recording_id === selectedAnalysisId && <div className="source-box-controls"><button className={`row-action-button ${frameRegionMode === "gameplay_box" ? "selected" : ""}`} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status) || !sourceViewport} onClick={() => { setFrameBoxDraft(null); setFrameRegionMode((mode) => mode === "gameplay_box" ? null : "gameplay_box"); }}>▧ {renderOptions.gameplay_box ? "Redraw gameplay area" : "Draw gameplay area"}</button>{renderOptions.gameplay_box && <button className="icon-button" aria-label="Clear gameplay area" title="Clear gameplay area" onClick={() => clearFrameRegion("gameplay_box")}>×</button>}<button className={`row-action-button ${frameRegionMode === "facecam_box" ? "selected" : ""}`} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status) || !sourceViewport} onClick={() => { setFrameBoxDraft(null); setFrameRegionMode((mode) => mode === "facecam_box" ? null : "facecam_box"); }}>▧ {renderOptions.facecam_box ? "Redraw facecam area" : "Draw facecam area"}</button>{renderOptions.facecam_box && <button className="icon-button" aria-label="Clear facecam area" title="Clear facecam area" onClick={() => clearFrameRegion("facecam_box")}>×</button>}<span>{frameRegionMode ? `Drag across the video to mark the ${frameRegionMode === "gameplay_box" ? "gameplay" : "facecam"}.` : "Draw boxes to use gameplay-only or camera layouts."}</span></div>}
             {selectedClip && selectedClip.recording_id === selectedAnalysisId && <div className="source-review-controls"><button className="row-action-button" disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onClick={() => setTrimFromPlayhead("in")}>I · Set in</button><button className="row-action-button" disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onClick={() => setTrimFromPlayhead("out")}>O · Set out</button><span>Space plays/pauses · {trimDraft.start_seconds.toFixed(1)}s → {trimDraft.end_seconds.toFixed(1)}s</span></div>}
           </section>}
+          {selectedClip && selectedClip.recording_id === selectedAnalysisId && <div className="framing-preset-controls"><label>Save framing<input maxLength={40} value={framingPresetName} onChange={(event) => setFramingPresetName(event.target.value)} placeholder="Preset name" /></label><button className="row-action-button" onClick={saveFramingPreset}>Save layout</button><label>Saved layouts<select value={framingPresetSelection} onChange={(event) => setFramingPresetSelection(event.target.value)}><option value="">Choose a saved layout</option>{framingPresets.map((preset) => <option key={preset.name} value={preset.name}>{preset.name}</option>)}</select></label><button className="row-action-button" disabled={!framingPresetSelection} onClick={loadFramingPreset}>Load layout</button></div>}
+          <section className="ai-parts-panel">
+            <div className="ai-parts-heading"><div><div className="section-overline">AI PARTS</div><h4>Find several strong moments</h4><p>Ask the configured local model to choose clear 15–45 second sections from this transcript. You can review and select the ranges before adding them to your clips.</p></div><span className="ai-parts-provider">{aiPartsProvider ?? "Local AI"}</span></div>
+            <div className="ai-parts-controls"><label>How many parts?<input type="number" min={1} max={100} value={aiPartCount} disabled={aiPartsBusy || clipBusy} onChange={(event) => setAiPartCount(Math.max(1, Math.min(100, Number(event.target.value) || 1)))} /></label><label>Focus phrase<input maxLength={160} value={focusPrompt} disabled={aiPartsBusy || clipBusy} onChange={(event) => setFocusPrompt(event.target.value)} placeholder="Optional, e.g. clutch plays or funny reactions" /></label><button className="secondary-button" disabled={aiPartsBusy || clipBusy || !analysis.transcript} onClick={() => void suggestAiParts()}>{aiPartsBusy ? <LoaderCircle className="spin" size={14} /> : <Sparkles size={14} />}{aiPartsBusy ? "Finding parts…" : "Suggest parts"}</button></div>
+            {aiPartsNote && <p className="ai-parts-note">{aiPartsNote}</p>}
+            {aiParts.length > 0 && <>
+              <div className="ai-parts-selection-bar"><span>{selectedAiPartIds.length} of {aiParts.length} selected</span><div><button type="button" className="row-action-button" onClick={() => setSelectedAiPartIds(aiParts.map((part) => part.id))}>Select all</button><button type="button" className="row-action-button" onClick={() => setSelectedAiPartIds([])}>Clear</button><button type="button" className="primary-button" disabled={!selectedAiPartIds.length || clipBusy} onClick={() => void createSelectedAiParts()}>{clipBusy ? <LoaderCircle className="spin" size={13} /> : <Film size={13} />} Create selected clips</button></div></div>
+              <div className="ai-parts-list">{aiParts.map((part) => <label className="ai-part-row" key={part.id}><input type="checkbox" checked={selectedAiPartIds.includes(part.id)} disabled={clipBusy} onChange={(event) => setSelectedAiPartIds((current) => event.target.checked ? [...current, part.id] : current.filter((id) => id !== part.id))} /><span className="ai-part-time">{formatDuration(part.start_seconds)}–{formatDuration(part.end_seconds)}</span><span className="ai-part-copy"><strong>{part.title}</strong><small>{part.reason || "Transcript-selected moment"}</small></span><span className="ai-part-duration">{Math.round(part.end_seconds - part.start_seconds)} sec</span></label>)}</div>
+            </>}
+          </section>
           <div className="candidate-section-heading"><div><div className="section-overline">AI SELECTED MOMENTS</div><h4>Candidate highlights</h4></div><span>Clips, captions, and metadata are prepared in the background. You can still edit each result.</span></div>
           {analysis.candidates.length ? <div className="candidate-list">{analysis.candidates.map((candidate, index) => {
             const excerpt = analysis.transcript?.segments.filter((segment) => segment.end > candidate.start_seconds && segment.start < candidate.end_seconds).slice(0, 5) ?? [];
@@ -1399,25 +1640,47 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
                   <label>Frame<select value={renderOptions.aspect_ratio} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, aspect_ratio: event.target.value as RenderOptions["aspect_ratio"], format_preset: "custom" }))}><option value="9:16">9:16 · Shorts / Reels</option><option value="1:1">1:1 · Square</option><option value="4:5">4:5 · Portrait</option><option value="16:9">16:9 · Landscape</option></select></label>
                   <label>Resolution<select value={renderOptions.resolution} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, resolution: Number(event.target.value) as RenderOptions["resolution"] }))}><option value={720}>720p</option><option value={1080}>1080p</option><option value={2160}>4K</option></select></label>
                   <label>Frame rate<select value={renderOptions.frame_rate} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, frame_rate: event.target.value === "source" ? "source" : Number(event.target.value) as 24 | 30 | 60 }))}><option value="source">Keep source</option><option value={24}>24 fps</option><option value={30}>30 fps</option><option value={60}>60 fps</option></select></label>
-                  <label>Layout<select value={renderOptions.layout} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, layout: event.target.value as RenderOptions["layout"] }))}><option value="blur">Blurred fill</option><option value="blur_top">Blur fill · focus top</option><option value="blur_bottom">Blur fill · focus bottom</option><option value="fit">Fit with bars</option><option value="fill">Crop to fill · center</option><option value="fill_top">Crop to fill · top</option><option value="fill_bottom">Crop to fill · bottom</option><option value="gameplay_only" disabled={!renderOptions.gameplay_box}>Gameplay only · drawn area</option><option value="facecam_overlay" disabled={!renderOptions.facecam_box}>Gameplay + facecam overlay</option><option value="camera_top" disabled={!renderOptions.facecam_box}>Camera above gameplay</option><option value="camera_bottom" disabled={!renderOptions.facecam_box}>Camera below gameplay</option><option value="side_by_side" disabled={!renderOptions.facecam_box}>Side-by-side</option></select></label>
-                  {renderOptions.layout === "facecam_overlay" && <><label>Facecam position<select value={renderOptions.facecam_position} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, facecam_position: event.target.value as RenderOptions["facecam_position"] }))}><option value="top_left">Top left</option><option value="top_right">Top right</option><option value="bottom_left">Bottom left</option><option value="bottom_right">Bottom right</option><option value="bottom_center">Bottom center</option></select></label><label>Facecam size<input type="range" min={16} max={50} value={renderOptions.facecam_size_percent} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, facecam_size_percent: Number(event.target.value) }))} /><small>{renderOptions.facecam_size_percent}% of frame</small></label></>}
+                  <label>Layout<select value={renderOptions.layout} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, layout: event.target.value as RenderOptions["layout"] }))}><option value="blur">Blurred fill</option><option value="blur_top">Blur fill · focus top</option><option value="blur_bottom">Blur fill · focus bottom</option><option value="fit">Fit with bars</option><option value="fill">Crop to fill · center</option><option value="fill_top">Crop to fill · top</option><option value="fill_bottom">Crop to fill · bottom</option><option value="no_facecam">Full frame · no facecam</option><option value="gameplay_only" disabled={!renderOptions.gameplay_box}>Gameplay only · drawn area</option><option value="facecam_overlay" disabled={!renderOptions.facecam_box}>Gameplay + facecam overlay</option><option value="facecam_circle" disabled={!renderOptions.facecam_box}>Circular facecam overlay</option><option value="camera_top" disabled={!renderOptions.facecam_box}>Camera above gameplay</option><option value="camera_bottom" disabled={!renderOptions.facecam_box}>Camera below gameplay</option><option value="side_by_side" disabled={!renderOptions.facecam_box}>Side-by-side</option></select></label>
+                  {["facecam_overlay", "facecam_circle"].includes(renderOptions.layout) && <><label>Facecam position<select value={renderOptions.facecam_position} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, facecam_position: event.target.value as RenderOptions["facecam_position"] }))}><option value="top_left">Top left</option><option value="top_right">Top right</option><option value="bottom_left">Bottom left</option><option value="bottom_right">Bottom right</option><option value="bottom_center">Bottom center</option></select></label><label>Facecam size<input type="range" min={16} max={50} value={renderOptions.facecam_size_percent} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, facecam_size_percent: Number(event.target.value) }))} /><small>{renderOptions.facecam_size_percent}% of frame</small></label></>}
                   <label>Captions<select value={renderOptions.caption_style} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => { const style = event.target.value as RenderOptions["caption_style"]; setRenderOptions((options) => ({ ...options, caption_style: style, caption_font: style === "impact" ? "Impact" : "Arial" })); }}><option value="neon">GTA Neon</option><option value="impact">Impact</option><option value="clean">Clean</option><option value="hormozi">Hormozi</option><option value="mrbeast">MrBeast</option></select></label>
-                  <label>Caption motion<select value={renderOptions.caption_animation} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, caption_animation: event.target.value as RenderOptions["caption_animation"] }))}><option value="static">Static lines</option><option value="word_highlight">Word highlight</option></select></label>
+                  <label>Caption motion<select value={renderOptions.caption_animation} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, caption_animation: event.target.value as RenderOptions["caption_animation"] }))}><option value="word_highlight">Word highlight</option><option value="pop_in">Pop-in words</option><option value="pop_in_line">Pop-in line</option><option value="one_by_one">One word at a time</option><option value="build_up">Build the line</option><option value="static">Full line</option></select></label>
                   <label>Watermark<input maxLength={60} value={renderOptions.watermark_text} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, watermark_text: event.target.value }))} placeholder="Optional creator name" /></label>
-                  <label>Opening hook<input maxLength={100} value={renderOptions.opening_hook} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, opening_hook: event.target.value }))} placeholder="Optional first 2.5 seconds" /></label>
-                  <label>Outro ribbon<input maxLength={100} value={renderOptions.outro_text} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, outro_text: event.target.value }))} placeholder="Optional final 2.5 seconds" /></label>
+                  <label>Opening hook<input maxLength={100} value={renderOptions.opening_hook} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, opening_hook: event.target.value }))} placeholder="Optional first seconds" /></label>
+                  <label>Hook duration<input type="number" min={2} max={60} value={renderOptions.opening_hook_seconds} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, opening_hook_seconds: Math.max(2, Math.min(60, Number(event.target.value) || 2)) }))} /></label>
+                  <label>Outro ribbon<input maxLength={100} value={renderOptions.outro_text} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, outro_text: event.target.value }))} placeholder="Optional closing line" /></label>
+                  <label>Outro duration<input type="number" min={1.5} max={8} step={0.5} value={renderOptions.outro_seconds} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, outro_seconds: Math.max(1.5, Math.min(8, Number(event.target.value) || 1.5)) }))} /></label>
                   <label>Caption font<select value={renderOptions.caption_font} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, caption_font: event.target.value as RenderOptions["caption_font"] }))}><option>Arial</option><option>Impact</option><option>Tahoma</option><option>Verdana</option></select></label>
                   <label>Font size<input type="number" min={24} max={100} value={renderOptions.caption_size} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, caption_size: Math.max(24, Math.min(100, Number(event.target.value) || 24)) }))} /></label>
                   <label>Words per line<input type="number" min={2} max={12} value={renderOptions.caption_words_per_line} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, caption_words_per_line: Math.max(2, Math.min(12, Number(event.target.value) || 2)) }))} /></label>
                   <label>Text color<input type="color" value={renderOptions.caption_text_color} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, caption_text_color: event.target.value.toUpperCase() }))} /></label>
                   <label>Outline color<input type="color" value={renderOptions.caption_outline_color} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, caption_outline_color: event.target.value.toUpperCase() }))} /></label>
                 </div>
+                <details className="render-style-advanced">
+                  <summary>More visual styling · templates, backgrounds, logo & credits</summary>
+                  <div className="render-controls">
+                    <label>Social template<select value={renderOptions.template} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, template: event.target.value as RenderOptions["template"] }))}><option value="none">None</option><option value="x_light">Post card · light</option><option value="x_dark">Post card · dark</option><option value="tiktok_hook">Shorts hook card</option><option value="breaking_news">Breaking news</option></select></label>
+                    {renderOptions.template !== "none" && <><label>Card title<input maxLength={60} value={renderOptions.template_name} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, template_name: event.target.value }))} placeholder="Name or hook" /></label><label>Card handle<input maxLength={60} value={renderOptions.template_handle} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, template_handle: event.target.value }))} placeholder="@handle" /></label></>}
+                    <label>Background<select value={renderOptions.background_mode} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, background_mode: event.target.value as RenderOptions["background_mode"] }))}><option value="none">None</option><option value="blur">Blurred source</option><option value="color">Solid color</option><option value="gradient">Two-color gradient</option><option value="image" disabled={!renderOptions.background_asset_id}>My image</option></select></label>
+                    {["color", "gradient"].includes(renderOptions.background_mode) && <><label>Background color<input type="color" value={renderOptions.background_color} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, background_color: event.target.value.toUpperCase() }))} /></label>{renderOptions.background_mode === "gradient" && <label>Second color<input type="color" value={renderOptions.background_color2} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, background_color2: event.target.value.toUpperCase() }))} /></label>}</>}
+                    <label>Background image<div className="asset-choice"><span>{renderOptions.background_name || "No image selected"}</span><button type="button" className="row-action-button" disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onClick={() => { setImageUploadTarget("background"); imageFileRef.current?.click(); }}><Upload size={12} />Choose</button>{renderOptions.background_asset_id && <button type="button" className="icon-button" aria-label="Remove background image" disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onClick={() => setRenderOptions((options) => ({ ...options, background_asset_id: null, background_name: "", background_mode: options.background_mode === "image" ? "none" : options.background_mode }))}>×</button>}</div></label>
+                    <label>Background dim<input type="range" min={0} max={80} value={renderOptions.background_dim_percent} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, background_dim_percent: Number(event.target.value) }))} /><small>{renderOptions.background_dim_percent}%</small></label>
+                    <label>Frame padding<input type="range" min={0} max={28} value={renderOptions.card_padding_percent} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, card_padding_percent: Number(event.target.value) }))} /><small>{renderOptions.card_padding_percent}%</small></label>
+                    <label>Creator watermark<input maxLength={60} value={renderOptions.watermark_text} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, watermark_text: event.target.value }))} placeholder="Name or @handle" /></label>
+                    <label>Logo / watermark image<div className="asset-choice"><span>{renderOptions.logo_name || "No image selected"}</span><button type="button" className="row-action-button" disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onClick={() => { setImageUploadTarget("logo"); imageFileRef.current?.click(); }}><Upload size={12} />Choose</button>{renderOptions.logo_asset_id && <button type="button" className="icon-button" aria-label="Remove logo image" disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onClick={() => setRenderOptions((options) => ({ ...options, logo_asset_id: null, logo_name: "" }))}>×</button>}</div></label>
+                    <label>Logo position<select value={renderOptions.logo_position} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, logo_position: event.target.value as RenderOptions["logo_position"] }))}><option value="top_left">Top left</option><option value="top_right">Top right</option><option value="bottom_left">Bottom left</option><option value="bottom_right">Bottom right</option></select></label>
+                    <label>Logo size<input type="range" min={5} max={35} value={renderOptions.logo_size_percent} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status) || !renderOptions.logo_asset_id} onChange={(event) => setRenderOptions((options) => ({ ...options, logo_size_percent: Number(event.target.value) }))} /><small>{renderOptions.logo_size_percent}%</small></label>
+                    <label>Logo opacity<input type="range" min={10} max={100} value={renderOptions.logo_opacity} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status) || !renderOptions.logo_asset_id} onChange={(event) => setRenderOptions((options) => ({ ...options, logo_opacity: Number(event.target.value) }))} /><small>{renderOptions.logo_opacity}%</small></label>
+                    <label>Credit line<input maxLength={100} value={renderOptions.credit_text} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, credit_text: event.target.value }))} placeholder="Optional attribution" /></label>
+                  </div>
+                </details>
                 <div className="music-bed-controls">
                   <input ref={musicFileRef} className="sr-only" type="file" accept="audio/*,.mp3,.m4a,.aac,.wav,.ogg,.flac,.opus" onChange={(event) => void importMusicFile(event.target.files?.[0])} />
                   <div><strong>Music bed</strong><span>{renderOptions.music_name || "Add a local audio track"}</span></div>
                   <button className="secondary-button" disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onClick={() => musicFileRef.current?.click()}><Upload size={12} />Choose audio</button>
                   {renderOptions.music_asset_id && <button className="icon-button" aria-label="Remove music bed" title="Remove music bed" disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onClick={() => setRenderOptions((options) => ({ ...options, music_asset_id: null, music_name: "" }))}>×</button>}
                   <label>Volume<input type="range" min={0} max={100} value={renderOptions.music_volume} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status) || !renderOptions.music_asset_id} onChange={(event) => setRenderOptions((options) => ({ ...options, music_volume: Number(event.target.value) }))} /><small>{renderOptions.music_volume}%</small></label>
+                  <label>Music peak<input type="range" min={0} max={100} value={renderOptions.music_peak_volume} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status) || !renderOptions.music_asset_id} onChange={(event) => setRenderOptions((options) => ({ ...options, music_peak_volume: Number(event.target.value) }))} /><small>{renderOptions.music_peak_volume}%</small></label>
+                  <label>Music riser<input type="number" min={1} max={15} value={renderOptions.music_riser_seconds} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status) || !renderOptions.music_asset_id} onChange={(event) => setRenderOptions((options) => ({ ...options, music_riser_seconds: Math.max(1, Math.min(15, Number(event.target.value) || 1)) }))} /><small>seconds</small></label>
                   <label>Fade<input type="number" min={0} max={5} step={0.5} value={renderOptions.music_fade_seconds} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status) || !renderOptions.music_asset_id} onChange={(event) => setRenderOptions((options) => ({ ...options, music_fade_seconds: Math.max(0, Math.min(5, Number(event.target.value) || 0)) }))} /><small>seconds</small></label>
                 </div>
                 <div className="clip-editor-actions"><button className="secondary-button" disabled={!captionDraftChanged || clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onClick={() => void saveCaptions()}>{clipBusy ? <LoaderCircle size={13} className="spin" /> : <Check size={13} />}{captionDraftChanged ? "Save captions" : "Captions saved"}</button><button className="secondary-button apply-source-style" disabled={clipBusy || captionDraftChanged || trimDraftChanged || ["queued", "rendering", "paused"].includes(selectedClip.status)} onClick={() => void renderSourceClips()}><Layers3 size={13} /> Apply style to source clips</button><button className="primary-button" disabled={clipBusy || captionDraftChanged || trimDraftChanged || ["queued", "rendering", "paused"].includes(selectedClip.status) || (selectedClip.status === "rendered" && !renderSettingsChanged)} onClick={() => void renderClip()}>{clipBusy ? <LoaderCircle size={13} className="spin" /> : selectedClip.status === "rendered" && !renderSettingsChanged ? <Check size={13} /> : <Play size={13} />}{selectedClip.status === "rendered" ? renderSettingsChanged ? "Re-render clip" : "Rendered" : selectedClip.status === "paused" ? "Render paused" : selectedClip.status === "queued" || selectedClip.status === "rendering" ? "Rendering…" : "Render clip"}</button></div>
@@ -1945,7 +2208,7 @@ function LivePage({ onRefresh }: { onRefresh: () => void }) {
           <div className="section-overline">01 · CHOOSE YOUR MOMENT</div><h3>Clip from the rolling buffer</h3><p>Select the latest window to send to the highlight detector.</p>
           <div className="live-form-grid">
             <label>Recent footage<select value={duration} onChange={(event) => setDuration(Number(event.target.value) as 15 | 30 | 45)}><option value={15}>Last 15 seconds</option><option value={30}>Last 30 seconds</option><option value={45}>Last 45 seconds</option></select></label>
-            <label>Speech language<select value={language} onChange={(event) => setLanguage(event.target.value as TranscriptionLanguage)}><option value="auto">Auto detect</option><option value="en">English</option><option value="hi">Hindi</option><option value="es">Spanish</option><option value="fr">French</option><option value="de">German</option><option value="pt">Portuguese</option><option value="ja">Japanese</option><option value="ko">Korean</option><option value="zh">Chinese</option><option value="it">Italian</option><option value="ru">Russian</option><option value="ar">Arabic</option></select></label>
+            <label>Speech language<select value={language} onChange={(event) => setLanguage(event.target.value as TranscriptionLanguage)}>{TRANSCRIPTION_LANGUAGE_OPTIONS.map(([code, label]) => <option key={code} value={code}>{label}</option>)}</select></label>
             <label>Platform format<select value={renderOptions.format_preset} onChange={(event) => { const preset = event.target.value as RenderOptions["format_preset"]; const ratios: Record<RenderOptions["format_preset"], RenderOptions["aspect_ratio"]> = { youtube_shorts: "9:16", tiktok: "9:16", instagram_reels: "9:16", instagram_portrait: "4:5", square: "1:1", landscape: "16:9", custom: renderOptions.aspect_ratio }; setRenderOptions((options) => ({ ...options, format_preset: preset, aspect_ratio: ratios[preset] })); }}><option value="youtube_shorts">YouTube Shorts · 9:16</option><option value="tiktok">TikTok · 9:16</option><option value="instagram_reels">Instagram Reels · 9:16</option><option value="instagram_portrait">Instagram portrait · 4:5</option><option value="square">Square · 1:1</option><option value="landscape">Landscape · 16:9</option><option value="custom">Custom frame</option></select></label>
             <label>Caption style<select value={renderOptions.caption_style} onChange={(event) => setRenderOptions((options) => ({ ...options, caption_style: event.target.value as RenderOptions["caption_style"] }))}><option value="neon">Neon pop</option><option value="impact">Impact</option><option value="clean">Clean</option><option value="hormozi">Bold emphasis</option><option value="mrbeast">Creator punch</option></select></label>
           </div>

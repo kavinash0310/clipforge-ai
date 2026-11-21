@@ -15,6 +15,7 @@ import numpy as np
 from faster_whisper import WhisperModel
 
 from .config import DATA_DIR
+from .transliteration import to_hinglish
 
 
 def _output_directory(recording_id: str) -> Path:
@@ -160,12 +161,46 @@ def detect_scene_cuts(
     return sorted(set(round(float(value), 3) for value in cuts))
 
 
+def detect_visual_activity(
+    source: Path,
+    destination: Path,
+    check_cancel: Callable[[], None] | None = None,
+    cpu_threads: int = 1,
+) -> list[float]:
+    """Build a per-second low-resolution frame-difference signal for deep analysis."""
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise RuntimeError("FFmpeg was not found on PATH. Install FFmpeg and restart ClipForge.")
+    command = [
+        ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-threads", str(max(1, cpu_threads)),
+        "-i", str(source), "-an", "-vf", "fps=1,scale=160:90:flags=fast_bilinear,format=gray",
+        "-fps_mode", "vfr", "-f", "rawvideo", str(destination),
+    ]
+    try:
+        result = _run_cancellable(command, 3600, check_cancel)
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError("The deep visual scan timed out. The source file was left unchanged.") from error
+    if result.returncode != 0:
+        detail = (result.stderr or "").strip()[-800:]
+        raise RuntimeError(f"The deep visual scan failed. {detail}".strip())
+
+    frame_bytes = 160 * 90
+    raw = np.fromfile(destination, dtype=np.uint8)
+    frame_count = len(raw) // frame_bytes
+    if frame_count < 2:
+        return [0.0] * max(1, frame_count)
+    frames = raw[:frame_count * frame_bytes].reshape((frame_count, 90, 160)).astype(np.int16)
+    differences = np.abs(frames[1:] - frames[:-1]).mean(axis=(1, 2)) / 255.0
+    return [0.0, *[round(float(value), 5) for value in differences]]
+
+
 def transcribe_recording(
     *,
     source: Path,
     recording_id: str,
     model_name: str,
     language: str | None,
+    analysis_mode: str = "fast",
     cpu_threads: int,
     progress: Callable[[int, int, str], None],
     check_cancel: Callable[[], None],
@@ -183,6 +218,12 @@ def transcribe_recording(
         check_cancel()
         progress(34, 0, "detecting_scenes")
         scene_cuts = detect_scene_cuts(source, check_cancel, cpu_threads)
+        visual_motion_by_second: list[float] = []
+        if analysis_mode == "deep":
+            check_cancel()
+            progress(39, 0, "scanning_visual_motion")
+            motion_path = Path(temporary_directory) / "visual-motion.gray"
+            visual_motion_by_second = detect_visual_activity(source, motion_path, check_cancel, cpu_threads)
 
         check_cancel()
         progress(42, 0, "loading_model")
@@ -194,10 +235,11 @@ def transcribe_recording(
             download_root=str(DATA_DIR / "models"),
         )
         progress(49, 0, "transcribing")
+        whisper_language = "hi" if language == "hinglish" else language
         generated, info = model.transcribe(
             str(wav_path),
             beam_size=3,
-            language=language,
+            language=whisper_language,
             vad_filter=True,
             word_timestamps=False,
             condition_on_previous_text=False,
@@ -207,6 +249,8 @@ def transcribe_recording(
         for segment in generated:
             check_cancel()
             text = segment.text.strip()
+            if text and language == "hinglish":
+                text = to_hinglish(text)
             if text:
                 segments.append(
                     {
@@ -224,7 +268,7 @@ def transcribe_recording(
         srt_path = output_dir / "transcript.srt"
         transcript_path = output_dir / "transcript.json"
         transcript = {
-            "language": info.language,
+            "language": "hi-Latn" if language == "hinglish" else info.language,
             "language_probability": round(float(info.language_probability), 4),
             "model": model_name,
             "device": "cpu",
@@ -247,5 +291,6 @@ def transcribe_recording(
             "energy_by_second": energy_by_second,
             "audio_profile": audio_profile,
             "scene_cuts": scene_cuts,
+            "visual_motion_by_second": visual_motion_by_second,
         }
 

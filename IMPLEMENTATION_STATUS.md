@@ -169,3 +169,14 @@
 - Real render produced a valid H.264 1080 × 1920 MP4 with a 3-second duration and generated SRT.
 - No live Google upload was run; OAuth/channel consent stays outside automated integration testing.
 
+## Neon-inspired feature additions
+
+- [x] Adjustable 15–45 second min/max clip ranges, Fast/Deep analysis, and low-resolution motion scoring in Deep mode.
+- [x] Expanded transcription languages, including a Hinglish output option.
+- [x] Rating-aware highlight weighting based on saved local feedback.
+- [x] AI Parts suggestions from transcript timestamps through local Ollama, validated against source duration with ranked local candidates as fallback.
+- [x] Exact transcript-range clip creation with selected-part batch actions.
+- [x] Additional caption animation, social templates, backgrounds, image logo overlays, credit text, and music riser settings in both creation and editor workflows.
+- [ ] Dedicated phone remote pairing, public live-chat clipping, creator-channel monitoring, and public platform watch-page extraction are not included in this local workflow.
+- These additions are documented but have not been run through the automated test suite or production UI build in this change.
+
