@@ -8,11 +8,11 @@ The readiness card reports FFmpeg, NVIDIA GPU, faster-whisper, and Ollama availa
 
 ## Generate captioned clips
 
-1. Open Media library and choose a local video or paste its path. To clip your own YouTube upload, download its MP4 from [YouTube Studio](https://studio.youtube.com) first; ClipForge does not download watch links.
-2. Confirm that you own the recording or are authorized to use it. ClipForge reads the source path and does not overwrite or copy the original.
-3. Choose how many clips to create (1–100, default 1) and a duration (15, 30, or 45 seconds).
-4. Wait for inspection to finish, then choose **Analyze**. On first use, faster-whisper downloads the selected model into app data. Transcription and moment ranking run locally.
-5. ClipForge queues vertical renders with captions and generates a title, description, hashtags, and relevant search tags for each result. Open **View results** to review the transcript, edit captions, and preview each render.
+1. Open **Create clips** and choose **Upload video**, **Paste a link**, or **Local path**. Uploads and direct media-file links are copied into the configured output folder's `sources` directory; local paths are read in place. A link must return a video file directly (MP4, MKV, MOV, AVI, MPEG, or WebM). YouTube, Twitch, and Kick watch pages are not direct video files. For your own YouTube upload, download its MP4 from [YouTube Studio](https://studio.youtube.com) first.
+2. Confirm that you own the recording or are authorized to use it.
+3. Choose how many clips to create (1–100, default 1) and a duration (15, 30, or 45 seconds), then choose **Make clips**. Inspection starts first, then ClipForge queues analysis automatically.
+4. On first use, faster-whisper downloads the selected model into app data. Transcription and moment ranking run locally. Open **View results** to review the transcript, edit captions, and preview each render.
+5. ClipForge queues vertical renders with captions and generates a title, description, hashtags, and relevant search tags for each result.
 
 Moment scores rank audio peaks, speech, excitement cues, and scene changes. The requested count is a maximum; a source may produce fewer clips when moments do not meet the signal threshold. Candidates shorter than the requested duration can occur when the source itself is shorter.
 
@@ -32,7 +32,7 @@ Times use your computer's local timezone. The first scheduled time must be at le
 
 Titles, descriptions, and tags are generated from gameplay context, using local Ollama when available and an offline template otherwise. Tags stay relevant to the clip and do not guarantee reach. Review metadata before upload. No metadata or video edit can guarantee that a platform will not make a copyright claim or issue a strike.
 
-Only rendered clips from a local source with authorization confirmation can be uploaded. The app does not download arbitrary YouTube links.
+Only rendered clips from a local source with authorization confirmation can be uploaded. The app accepts direct public video-file URLs; it does not extract video from platform watch pages.
 
 ## Settings
 

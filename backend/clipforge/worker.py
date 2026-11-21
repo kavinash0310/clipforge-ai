@@ -92,6 +92,15 @@ def _process_job(job: dict[str, Any]) -> None:
             save_recording_metadata(recording_id, metadata)
             update_recording_status(recording_id, "ready", metadata["duration_seconds"])
             update_job(job_id, status="complete", stage="complete", progress=100, error_message="")
+            inspect_payload = json.loads(job.get("payload_json") or "{}")
+            auto_analysis = inspect_payload.get("auto_analysis")
+            if isinstance(auto_analysis, dict):
+                queued = create_analysis_job(
+                    recording_id,
+                    clip_count=auto_analysis.get("clip_count", 1),
+                    clip_duration_seconds=auto_analysis.get("clip_duration_seconds", 30),
+                )
+                logger.info("Queued automatic clip analysis for recording %s as job %s", recording_id, queued["id"])
         elif job["job_type"] == "analyze_recording":
             if recording.get("duration_seconds") is None:
                 raise RuntimeError("Recording metadata is missing. Run inspection before analysis.")

@@ -549,6 +549,9 @@ function MediaPage({ onRefresh }: { onRefresh: () => void }) {
   const [jobs, setJobs] = useState<QueueJob[]>([]);
   const [clips, setClips] = useState<Clip[]>([]);
   const [path, setPath] = useState("");
+  const [sourceMode, setSourceMode] = useState<"upload" | "link" | "path">("upload");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [sourceUrl, setSourceUrl] = useState("");
   const [authorized, setAuthorized] = useState(false);
   const [clipCount, setClipCount] = useState(1);
   const [clipDuration, setClipDuration] = useState(30);
@@ -565,6 +568,7 @@ function MediaPage({ onRefresh }: { onRefresh: () => void }) {
   const [metadataForm, setMetadataForm] = useState<ClipMetadataForm>({ game_name: "", tone: "hype", title: "", description: "", hashtags: [], tags: [] });
   const [metadataBusy, setMetadataBusy] = useState(false);
   const metadataDirty = useRef(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -629,21 +633,50 @@ function MediaPage({ onRefresh }: { onRefresh: () => void }) {
 
   const importRecording = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!authorized) return;
     setBusy(true);
     setMessage(null);
     setPageError(null);
     try {
-      const result = await api<{ recording_id: string; job_id: string; display_name: string }>("/api/recordings", {
-        method: "POST",
-        body: JSON.stringify({ path, authorized }),
-      });
-      setMessage(`${result.display_name} added. Choose Find clips when the file is ready.`);
+      const clipOptions = { authorized, auto_analyze: true, clip_count: clipCount, clip_duration_seconds: clipDuration };
+      let result: { recording_id: string; job_id: string; display_name: string };
+      if (sourceMode === "upload") {
+        if (!selectedFile) throw new Error("Choose a video file first.");
+        const query = new URLSearchParams({
+          filename: selectedFile.name,
+          authorized: String(authorized),
+          auto_analyze: "true",
+          clip_count: String(clipCount),
+          clip_duration_seconds: String(clipDuration),
+        });
+        result = await api<{ recording_id: string; job_id: string; display_name: string }>(`/api/recordings/upload?${query.toString()}`, {
+          method: "POST",
+          headers: { "Content-Type": selectedFile.type || "application/octet-stream" },
+          body: selectedFile,
+        });
+      } else if (sourceMode === "link") {
+        if (!sourceUrl.trim()) throw new Error("Paste a direct video-file link first.");
+        result = await api<{ recording_id: string; job_id: string; display_name: string }>("/api/recordings/import-link", {
+          method: "POST",
+          body: JSON.stringify({ ...clipOptions, url: sourceUrl.trim() }),
+        });
+      } else {
+        if (!path.trim()) throw new Error("Choose a local video path first.");
+        result = await api<{ recording_id: string; job_id: string; display_name: string }>("/api/recordings", {
+          method: "POST",
+          body: JSON.stringify({ ...clipOptions, path: path.trim() }),
+        });
+      }
+      setMessage(`${result.display_name} added. ClipForge will find up to ${clipCount} clips after it checks the video.`);
       setPath("");
+      setSourceUrl("");
+      setSelectedFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
       setAuthorized(false);
       await refresh();
       onRefresh();
     } catch (reason) {
-      setPageError(reason instanceof Error ? reason.message : "The recording could not be imported.");
+      setPageError(reason instanceof Error ? reason.message : "The video could not be imported.");
     } finally {
       setBusy(false);
     }
@@ -838,20 +871,37 @@ function MediaPage({ onRefresh }: { onRefresh: () => void }) {
       <section className="surface-card import-card">
         <div className="import-card-header">
           <div className="import-icon"><Upload size={18} /></div>
-          <div><div className="section-overline">01 &nbsp;·&nbsp; ADD A SOURCE</div><h3>Start with a video</h3><p>Choose a recording from your computer or paste its file path. To use your own YouTube upload, get the MP4 from <a href="https://studio.youtube.com" target="_blank" rel="noreferrer">YouTube Studio</a> first.</p></div>
+          <div><div className="section-overline">01 &nbsp;·&nbsp; ADD A SOURCE</div><h3>Start with a video</h3><p>Upload a file or paste a direct video-file link. To use your own YouTube upload, download its MP4 from <a href="https://studio.youtube.com" target="_blank" rel="noreferrer">YouTube Studio</a> first.</p></div>
         </div>
         <form onSubmit={(event) => void importRecording(event)}>
-          <div className="path-entry-row">
-            <label className="sr-only" htmlFor="recording-path">Video file path</label>
-            <input id="recording-path" type="text" autoComplete="off" spellCheck={false} value={path} onChange={(event) => setPath(event.target.value)} placeholder="Video file path · for example D:\\Videos\\session.mp4" />
-            <button type="button" className="secondary-button browse-button" onClick={() => void browse()} disabled={busy}><HardDrive size={14} /> Browse files</button>
+          <div className="source-mode-tabs" role="group" aria-label="Choose a video source">
+            <button type="button" aria-pressed={sourceMode === "upload"} className={sourceMode === "upload" ? "selected" : ""} onClick={() => setSourceMode("upload")}><Upload size={14} /> Upload video</button>
+            <button type="button" aria-pressed={sourceMode === "link"} className={sourceMode === "link" ? "selected" : ""} onClick={() => setSourceMode("link")}><Link2 size={14} /> Paste a link</button>
+            <button type="button" aria-pressed={sourceMode === "path"} className={sourceMode === "path" ? "selected" : ""} onClick={() => setSourceMode("path")}><HardDrive size={14} /> Local path</button>
           </div>
+          {sourceMode === "upload" && <div className="upload-dropzone" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const dropped = event.dataTransfer.files[0]; if (dropped) setSelectedFile(dropped); }}>
+            <input ref={fileInputRef} id="source-video-file" className="sr-only" type="file" accept=".mp4,.m4v,.mkv,.mov,.avi,.webm,.mpeg,.mpg,video/*" onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)} />
+            <div className="upload-drop-icon"><Upload size={18} /></div>
+            <div className="upload-drop-copy"><strong>{selectedFile?.name ?? "Drop a video here"}</strong><span>{selectedFile ? `${formatBytes(selectedFile.size)} · ready to import` : "MP4, MKV, MOV, AVI, MPEG, or WebM"}</span></div>
+            <button type="button" className="secondary-button" onClick={() => fileInputRef.current?.click()} disabled={busy}>{selectedFile ? "Choose another" : "Browse videos"}</button>
+          </div>}
+          {sourceMode === "link" && <div className="source-link-entry">
+            <label className="sr-only" htmlFor="source-video-url">Direct video file URL</label>
+            <Link2 size={17} />
+            <input id="source-video-url" type="url" autoComplete="url" spellCheck={false} value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} placeholder="https://example.com/gameplay.mp4" />
+            <span className="source-link-hint">Direct video files only</span>
+          </div>}
+          {sourceMode === "path" && <div className="path-entry-row">
+            <label className="sr-only" htmlFor="recording-path">Video file path</label>
+            <input id="recording-path" type="text" autoComplete="off" spellCheck={false} value={path} onChange={(event) => setPath(event.target.value)} placeholder="D:\\Videos\\session.mp4" />
+            <button type="button" className="secondary-button browse-button" onClick={() => void browse()} disabled={busy}><HardDrive size={14} /> Browse this PC</button>
+          </div>}
           <div className="import-actions-row">
             <label className="authorization-check"><input type="checkbox" checked={authorized} onChange={(event) => setAuthorized(event.target.checked)} /><span className="checkmark"><Check size={12} /></span><span>I own this recording or have permission to use it.</span></label>
-            <button className="primary-button import-submit" type="submit" disabled={!path.trim() || !authorized || busy}>{busy ? <LoaderCircle className="spin" size={15} /> : <Upload size={15} />}{busy ? "Adding video…" : "Add video"}<ArrowUpRight size={14} /></button>
+            <button className="primary-button import-submit" type="submit" disabled={(sourceMode === "upload" ? !selectedFile : sourceMode === "link" ? !sourceUrl.trim() : !path.trim()) || !authorized || busy}>{busy ? <LoaderCircle className="spin" size={15} /> : <Sparkles size={15} />}{busy ? "Preparing clips…" : "Make clips"}<ArrowUpRight size={14} /></button>
           </div>
         </form>
-        <div className="import-footnote"><ShieldCheck size={14} /><span>Authorization is required before processing. This confirmation does not clear rights to third-party music or game assets.</span></div>
+        <div className="import-footnote"><ShieldCheck size={14} /><span>Video files are saved and processed on this PC. For links, use a direct media-file URL; platform watch pages aren’t file URLs.</span></div>
       </section>
 
       <section className="surface-card clip-plan-card">

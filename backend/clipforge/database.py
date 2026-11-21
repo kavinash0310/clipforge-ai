@@ -283,8 +283,17 @@ def read_overview(database_path: Path | None = None) -> dict[str, Any]:
     }
 
 
-def create_recording(recording_id: str, file_path: str, display_name: str, authorized: bool, database_path: Path | None = None) -> None:
+def create_recording(
+    recording_id: str,
+    file_path: str,
+    display_name: str,
+    authorized: bool,
+    database_path: Path | None = None,
+    *,
+    auto_analysis: dict[str, int] | None = None,
+) -> None:
     timestamp = utc_now()
+    inspect_payload = json.dumps({"auto_analysis": auto_analysis}) if auto_analysis else None
     with database_session(database_path) as connection:
         existing = connection.execute(
             "SELECT id FROM recordings WHERE lower(file_path) = lower(?)",
@@ -297,8 +306,8 @@ def create_recording(recording_id: str, file_path: str, display_name: str, autho
             (recording_id, file_path, display_name, int(authorized), timestamp),
         )
         connection.execute(
-            "INSERT INTO jobs(id, recording_id, job_type, status, progress, stage, created_at, updated_at) VALUES (?, ?, 'inspect_recording', 'queued', 0, 'queued', ?, ?)",
-            (f"job-{recording_id}", recording_id, timestamp, timestamp),
+            "INSERT INTO jobs(id, recording_id, payload_json, job_type, status, progress, stage, created_at, updated_at) VALUES (?, ?, ?, 'inspect_recording', 'queued', 0, 'queued', ?, ?)",
+            (f"job-{recording_id}", recording_id, inspect_payload, timestamp, timestamp),
         )
 
 

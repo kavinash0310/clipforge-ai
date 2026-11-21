@@ -22,7 +22,15 @@ Returns source paths, metadata, state, authorization confirmation, and transcrip
 
 ## `POST /api/recordings`
 
-Accepts a local `path` and `authorized: true`. The service verifies that the file exists and uses a supported video extension, then queues non-destructive ffprobe inspection. Duplicate paths return `409`; absent authorization returns `400`.
+Accepts a local `path`, `authorized: true`, and optional `auto_analyze`, `clip_count` (1–100), and `clip_duration_seconds` (15–45). When `auto_analyze` is true, inspection queues analysis automatically when the file is ready. The service verifies that the file exists and uses a supported video extension. Duplicate paths return `409`; absent authorization returns `400`.
+
+## `POST /api/recordings/upload`
+
+Accepts the raw video file as the request body and query parameters `filename`, `authorized=true`, `auto_analyze=true`, `clip_count=1`, and `clip_duration_seconds=30`. Supported files are MP4, M4V, MKV, MOV, AVI, MPEG, and WebM, up to 20 GB. The uploaded source is stored in `CLIPFORGE_OUTPUT_DIR\sources` (or the default output directory) before inspection.
+
+## `POST /api/recordings/import-link`
+
+Accepts `{"url":"https://host/video.mp4","authorized":true,"auto_analyze":true,"clip_count":1,"clip_duration_seconds":30}`. The link must be public HTTP(S) and return a direct video file; local/private network addresses, webpages, and playlists are rejected. Redirects are checked before each request and the source is capped at 20 GB. Platform watch pages such as YouTube, Twitch, and Kick are not direct media-file URLs.
 
 ## `POST /api/recordings/browse`
 
@@ -82,7 +90,7 @@ Generated metadata is a draft and must be checked for accuracy. Tags are kept re
 - `POST /api/youtube/schedule` accepts `{"clip_ids":["..."],"start_at":"2026-12-01T09:00:00+05:30","interval_minutes":90}` for 1–100 unique rendered clips with completed metadata. `start_at` must include a timezone and be at least 15 minutes in the future. Each following clip is offset by `interval_minutes` (15–4320, default 90). Videos are uploaded as private with YouTube's `status.publishAt`, then published by YouTube at the scheduled time.
 - `POST /api/youtube/analytics/refresh` requests the latest available 28-day views, likes, comments, and shares for completed YouTube publications, saves the per-video result, and returns the updated publication list.
 
-Place a Google Desktop OAuth client JSON at `%LOCALAPPDATA%\ClipForgeAI\client_secrets.json` (or in the configured `CLIPFORGE_DATA_DIR`). Enable YouTube Data API v3 and YouTube Analytics API in its project. The OAuth client file and OAuth grants are user-managed; the app does not include a shared client credential. Google consent is required for the account to grant channel scopes. Scheduled videos use YouTube's private-until-publish scheduling. ClipForge imports local files and does not download arbitrary YouTube links. See the [Desktop OAuth flow](https://developers.google.com/identity/protocols/oauth2/native-app), [video insert API](https://developers.google.com/youtube/data/reference/rest/v3/videos/insert), and [Analytics reports API](https://developers.google.com/youtube/analytics/reference/reports/query).
+Place a Google Desktop OAuth client JSON at `%LOCALAPPDATA%\ClipForgeAI\client_secrets.json` (or in the configured `CLIPFORGE_DATA_DIR`). Enable YouTube Data API v3 and YouTube Analytics API in its project. The OAuth client file and OAuth grants are user-managed; the app does not include a shared client credential. Google consent is required for the account to grant channel scopes. Scheduled videos use YouTube's private-until-publish scheduling. ClipForge accepts direct video-file URLs but does not extract media from YouTube watch pages. See the [Desktop OAuth flow](https://developers.google.com/identity/protocols/oauth2/native-app), [video insert API](https://developers.google.com/youtube/data/reference/rest/v3/videos/insert), and [Analytics reports API](https://developers.google.com/youtube/analytics/reference/reports/query).
 
 ## `GET /api/jobs`
 

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -46,6 +46,7 @@ from .database import (
     write_settings,
 )
 from .media import choose_video_file, validate_video_path
+from .source_import import SourceImportError, download_direct_video, save_uploaded_video
 from .system_info import collect_system_info
 from .worker import run_worker
 from .youtube_api import YouTubeAPIError, channel_analytics
@@ -100,9 +101,26 @@ class SettingsPatch(BaseModel):
         return sorted(value)
 
 
-class RecordingImport(BaseModel):
-    path: str = Field(min_length=1, max_length=2048)
+class RecordingImportOptions(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     authorized: bool
+    auto_analyze: bool = False
+    clip_count: int = Field(default=1, ge=1, le=100)
+    clip_duration_seconds: int = Field(default=30, ge=15, le=45)
+
+
+class RecordingImport(RecordingImportOptions):
+    path: str = Field(min_length=1, max_length=2048)
+
+
+class RecordingLinkImport(RecordingImportOptions):
+    url: str = Field(min_length=8, max_length=4096)
+
+    @field_validator("url")
+    @classmethod
+    def clean_url(cls, value: str) -> str:
+        return value.strip()
 
 
 class AnalyzeRecordingRequest(BaseModel):
@@ -558,26 +576,76 @@ def analyze_recording(
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 
-@app.post("/api/recordings", status_code=202)
-def import_recording(payload: RecordingImport) -> dict[str, Any]:
-    if not payload.authorized:
+def _register_recording(path: Path, display_name: str, options: RecordingImportOptions) -> dict[str, Any]:
+    if not options.authorized:
         raise HTTPException(status_code=400, detail="Confirm that you own or are authorized to use this recording before importing it.")
-    try:
-        path = validate_video_path(payload.path)
-    except ValueError as error:
-        raise HTTPException(status_code=400, detail=str(error)) from error
-    normalized_path = os.path.normcase(str(path))
+    normalized_path = os.path.normcase(str(path.resolve()))
     recording_id = uuid4().hex
+    auto_analysis = None
+    if options.auto_analyze:
+        auto_analysis = {
+            "clip_count": options.clip_count,
+            "clip_duration_seconds": options.clip_duration_seconds,
+        }
     try:
-        create_recording(recording_id, normalized_path, path.name, True)
+        create_recording(recording_id, normalized_path, display_name, True, auto_analysis=auto_analysis)
     except ValueError as error:
         raise HTTPException(status_code=409, detail=f"This recording is already in the library (ID {error.args[0]}).") from error
     return {
         "recording_id": recording_id,
         "job_id": f"job-{recording_id}",
         "status": "queued",
-        "display_name": path.name,
+        "display_name": display_name,
+        "auto_analyze": options.auto_analyze,
     }
+
+
+@app.post("/api/recordings", status_code=202)
+def import_recording(payload: RecordingImport) -> dict[str, Any]:
+    try:
+        path = validate_video_path(payload.path)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return _register_recording(path, path.name, payload)
+
+
+@app.post("/api/recordings/upload", status_code=202)
+async def upload_recording(
+    request: Request,
+    filename: str = Query(min_length=1, max_length=512),
+    authorized: bool = Query(default=False),
+    auto_analyze: bool = Query(default=True),
+    clip_count: int = Query(default=1, ge=1, le=100),
+    clip_duration_seconds: int = Query(default=30, ge=15, le=45),
+) -> dict[str, Any]:
+    if not authorized:
+        raise HTTPException(status_code=400, detail="Confirm that you own or are authorized to use this recording before importing it.")
+    options = RecordingImportOptions(
+        authorized=authorized,
+        auto_analyze=auto_analyze,
+        clip_count=clip_count,
+        clip_duration_seconds=clip_duration_seconds,
+    )
+    try:
+        path, display_name = await save_uploaded_video(filename, request.headers.get("content-type"), request.stream())
+        path = validate_video_path(str(path))
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return _register_recording(path, display_name, options)
+
+
+@app.post("/api/recordings/import-link", status_code=202)
+async def import_video_link(payload: RecordingLinkImport) -> dict[str, Any]:
+    if not payload.authorized:
+        raise HTTPException(status_code=400, detail="Confirm that you own or are authorized to use this recording before importing it.")
+    try:
+        path, display_name = await download_direct_video(payload.url)
+        path = validate_video_path(str(path))
+    except SourceImportError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return _register_recording(path, display_name, payload)
 
 
 @app.get("/api/jobs")
