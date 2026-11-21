@@ -8,6 +8,8 @@ Phase 1 is complete: dashboard, saved settings, database foundation, and hardwar
 
 ## Run in development
 
+On Windows, after completing setup below, double-click **Start ClipForge.bat** to launch the API and frontend and open the dashboard. Double-click **Stop ClipForge.bat** to stop the instances started by that launcher. Logs are saved under `%LOCALAPPDATA%\ClipForgeAI\launcher`.
+
 1. Install Python 3.12+, Node.js, and FFmpeg/ffprobe.
 2. In PowerShell, from the repository root:
 

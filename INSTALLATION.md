@@ -17,6 +17,8 @@ python -m pip install -r requirements.txt
 npm --prefix frontend install
 ```
 
+After setup, double-click `Start ClipForge.bat` in the project folder. It starts the backend and frontend in the background, then opens `http://127.0.0.1:5173` in your browser. Double-click `Stop ClipForge.bat` to stop those instances. Logs are in `%LOCALAPPDATA%\ClipForgeAI\launcher`. The launcher saves generated videos to `D:\Clip Forge` as previously configured.
+
 Run the backend and frontend in separate terminals:
 
 ```powershell
