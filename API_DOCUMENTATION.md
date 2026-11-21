@@ -36,6 +36,10 @@ Accepts `{"url":"https://host/video.mp4","authorized":true,"auto_analyze":true,"
 
 Opens the native Windows video picker and returns the selected path or `null` when cancelled.
 
+## `POST /api/music/upload`
+
+Accepts raw MP3, M4A, AAC, WAV, OGG, FLAC, or OPUS audio with a `filename` query parameter. Files up to 200 MB are stored under the configured output folder's local `assets/music` directory and checked for a readable audio stream. The response contains an opaque `asset_id` and display name.
+
 ## `POST /api/recordings/{recording_id}/analyze`
 
 Accepts `{"clip_count":1,"clip_duration_seconds":30,"moment_mix":"balanced"}`; count is 1–100 (default 1), duration is 15–45 seconds (default 30), and moment mix is `balanced`, `action`, or `dialogue`. Queues local transcription and highlight analysis for an inspected, authorized recording, then automatically queues a vertical render and metadata generation for each returned candidate. Repeated requests return the existing active analysis job. The requested count is a maximum because low-signal sources may yield fewer candidates.
@@ -47,6 +51,10 @@ Returns transcript segments, analysis summary, candidate scores, timestamps, rea
 ## `POST /api/recordings/{recording_id}/clips/from-transcript`
 
 Accepts `{"start_seconds":72.4,"clip_duration_seconds":30}` and creates a 15–45 second candidate centered near the chosen transcript timestamp, including the matching caption lines. The recording must have a transcript and authorization confirmation.
+
+## `POST /api/recordings/{recording_id}/clips/render`
+
+Accepts the same render settings as the per-clip render route and applies them to all clips from that recording. Active renders are returned as existing jobs; completed clips are re-rendered when their settings differ.
 
 ## `GET /api/recordings/{recording_id}/subtitles`
 
@@ -62,7 +70,11 @@ Saves clip-relative caption edits. `segments` is an array of `{ "start": 0.0, "e
 
 ## `POST /api/clips/{clip_id}/render`
 
-Accepts optional render settings: `aspect_ratio` (`9:16`, `1:1`, `4:5`, `16:9`), `layout` (`blur`, `fit`, `fill`), `caption_style` (`neon`, `impact`, `clean`, `hormozi`, `mrbeast`), and `watermark_text` (up to 60 characters). Queues a local render for an authorized candidate. FFmpeg trims the source timestamps and burns in the saved captions. Re-rendering uses the selected settings; the source recording is read-only.
+Accepts optional render settings: `aspect_ratio` (`9:16`, `1:1`, `4:5`, `16:9`), `layout` (`blur`, `fit`, `fill`), `caption_style` (`neon`, `impact`, `clean`, `hormozi`, `mrbeast`), `caption_animation` (`static`, `word_highlight`), `watermark_text` (up to 60 characters), `opening_hook` and `outro_text` (up to 100 characters each), `caption_font` (`Arial`, `Impact`, `Tahoma`, `Verdana`), `caption_size` (24–100), `caption_text_color` and `caption_outline_color` (hex colors), `caption_words_per_line` (2–12), `music_asset_id` (optional ID returned from music upload), `music_volume` (0–100), and `music_fade_seconds` (0–5). Queues a local render for an authorized candidate. FFmpeg trims the source timestamps and burns in captions/overlays; music is mixed with source audio and faded at both ends. Re-rendering uses the selected settings; the source recording is read-only.
+
+## `PATCH /api/clips/{clip_id}/range`
+
+Accepts source-relative `start_seconds` and `end_seconds`. The new range must fit inside the source and be 15–45 seconds long. Caption segments are trimmed to the new range and shifted to remain clip-relative.
 
 ## `PATCH /api/clips/{clip_id}/rating`
 

@@ -30,7 +30,7 @@ from .database import (
 )
 from .config import OUTPUT_DIR
 from .clip_rendering import render_vertical_clip
-from .media import probe_video, validate_video_path
+from .media import probe_video, resolve_music_asset, validate_video_path
 from .highlights import generate_highlights
 from .transcription import transcribe_recording
 from .metadata import generate_clip_metadata
@@ -155,6 +155,7 @@ def _process_job(job: dict[str, Any]) -> None:
             update_job(job_id, stage="preparing_subtitles", progress=12)
             clip_path = OUTPUT_DIR / recording_id / "clips" / f"{clip_id}.mp4"
             render_options = json.loads(job.get("payload_json") or "{}")
+            music_source = resolve_music_asset(render_options["music_asset_id"]) if render_options.get("music_asset_id") else None
 
             def render_progress(value: int, stage: str) -> None:
                 update_job(job_id, stage=stage, progress=value)
@@ -166,6 +167,7 @@ def _process_job(job: dict[str, Any]) -> None:
                 end_seconds=float(clip["end_seconds"]),
                 subtitles=clip["subtitles"],
                 render_options=render_options,
+                music_source=music_source,
                 progress=render_progress,
                 check_cancel=_ensure_not_paused,
                 cpu_threads=cpu_threads,

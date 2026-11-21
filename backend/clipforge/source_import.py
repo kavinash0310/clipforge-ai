@@ -16,7 +16,9 @@ from .config import OUTPUT_DIR
 
 
 MAX_SOURCE_BYTES = 20 * 1024 * 1024 * 1024
+MAX_MUSIC_BYTES = 200 * 1024 * 1024
 VIDEO_EXTENSIONS = {".mp4", ".m4v", ".mkv", ".mov", ".avi", ".webm", ".mpeg", ".mpg"}
+AUDIO_EXTENSIONS = {".mp3", ".m4a", ".aac", ".wav", ".ogg", ".flac", ".opus"}
 VIDEO_MIME_EXTENSIONS = {
     "video/mp4": ".mp4",
     "video/x-m4v": ".m4v",
@@ -84,6 +86,37 @@ async def _save_stream(filename: str, content_type: str | None, chunks: AsyncIte
 
 async def save_uploaded_video(filename: str, content_type: str | None, chunks: AsyncIterable[bytes]) -> tuple[Path, str]:
     return await _save_stream(filename, content_type, chunks)
+
+
+async def save_uploaded_music(filename: str, chunks: AsyncIterable[bytes]) -> tuple[Path, str]:
+    safe_name = _safe_filename(filename)
+    suffix = Path(safe_name).suffix.lower()
+    if suffix not in AUDIO_EXTENSIONS:
+        raise SourceImportError("Choose an MP3, M4A, AAC, WAV, OGG, FLAC, or OPUS audio file.")
+    directory = OUTPUT_DIR / "assets" / "music"
+    directory.mkdir(parents=True, exist_ok=True)
+    destination = directory / f"{uuid4().hex}{suffix}"
+    partial = destination.with_suffix(destination.suffix + ".part")
+    size = 0
+    try:
+        with partial.open("wb") as output:
+            async for chunk in chunks:
+                if not chunk:
+                    continue
+                size += len(chunk)
+                if size > MAX_MUSIC_BYTES:
+                    raise SourceImportError("Background music files must be 200 MB or smaller.")
+                output.write(chunk)
+        if size == 0:
+            raise SourceImportError("The selected audio file is empty.")
+        os.replace(partial, destination)
+    except BaseException as error:
+        partial.unlink(missing_ok=True)
+        destination.unlink(missing_ok=True)
+        if isinstance(error, SourceImportError) or not isinstance(error, Exception):
+            raise
+        raise SourceImportError("The background music upload did not finish.") from error
+    return destination, safe_name
 
 
 def _validate_public_url(url: str) -> None:

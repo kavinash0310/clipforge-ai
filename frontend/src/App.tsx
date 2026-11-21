@@ -117,8 +117,20 @@ type RenderOptions = {
   layout: "blur" | "fit" | "fill";
   caption_style: "neon" | "impact" | "clean" | "hormozi" | "mrbeast";
   watermark_text: string;
+  opening_hook: string;
+  outro_text: string;
+  caption_font: "Arial" | "Impact" | "Tahoma" | "Verdana";
+  caption_size: number;
+  caption_text_color: string;
+  caption_outline_color: string;
+  caption_words_per_line: number;
+  caption_animation: "static" | "word_highlight";
+  music_asset_id: string | null;
+  music_name: string;
+  music_volume: number;
+  music_fade_seconds: number;
 };
-const defaultRenderOptions: RenderOptions = { aspect_ratio: "9:16", layout: "blur", caption_style: "neon", watermark_text: "" };
+const defaultRenderOptions: RenderOptions = { aspect_ratio: "9:16", layout: "blur", caption_style: "neon", watermark_text: "", opening_hook: "", outro_text: "", caption_font: "Arial", caption_size: 50, caption_text_color: "#FFFFFF", caption_outline_color: "#351633", caption_words_per_line: 5, caption_animation: "static", music_asset_id: null, music_name: "", music_volume: 20, music_fade_seconds: 1.5 };
 type MetadataTone = "hype" | "funny" | "clean" | "competitive";
 type ClipMetadataForm = {
   game_name: string;
@@ -580,6 +592,7 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
   const [analyzingId, setAnalyzingId] = useState<string | null>(null);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const [captionDraft, setCaptionDraft] = useState<SubtitleSegment[]>([]);
+  const [trimDraft, setTrimDraft] = useState({ start_seconds: 0, end_seconds: 30 });
   const [renderOptions, setRenderOptions] = useState<RenderOptions>(defaultRenderOptions);
   const [clipBusy, setClipBusy] = useState(false);
   const [metadata, setMetadata] = useState<ClipMetadata | null>(null);
@@ -588,6 +601,7 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
   const metadataDirty = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const captionFileRef = useRef<HTMLInputElement>(null);
+  const musicFileRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -767,11 +781,13 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
   const captionDraftChanged = selectedClip
     ? JSON.stringify(captionDraft) !== JSON.stringify(selectedClip.subtitles)
     : false;
+  const trimDraftChanged = Boolean(selectedClip && (Math.abs(trimDraft.start_seconds - selectedClip.start_seconds) > 0.001 || Math.abs(trimDraft.end_seconds - selectedClip.end_seconds) > 0.001));
   const renderSettingsChanged = Boolean(selectedClip && JSON.stringify(selectedClip.render_metadata.settings ?? defaultRenderOptions) !== JSON.stringify(renderOptions));
 
   const editClip = (clip: Clip | RecordingAnalysis["candidates"][number]) => {
     setSelectedClipId(clip.id);
     setCaptionDraft(clip.subtitles.map((segment) => ({ ...segment })));
+    setTrimDraft({ start_seconds: clip.start_seconds, end_seconds: clip.end_seconds });
     setRenderOptions({ ...defaultRenderOptions, ...clip.render_metadata.settings });
     metadataDirty.current = false;
     setPageError(null);
@@ -881,6 +897,27 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
     }
   };
 
+  const saveTrim = async () => {
+    if (!selectedClip) return;
+    setClipBusy(true);
+    setPageError(null);
+    try {
+      const updated = await api<Clip>(`/api/clips/${encodeURIComponent(selectedClip.id)}/range`, {
+        method: "PATCH",
+        body: JSON.stringify(trimDraft),
+      });
+      setTrimDraft({ start_seconds: updated.start_seconds, end_seconds: updated.end_seconds });
+      setCaptionDraft(updated.subtitles.map((segment) => ({ ...segment })));
+      await refresh();
+      onRefresh();
+      setMessage("Trim saved. Captions were kept inside the new source range; render again to refresh the preview.");
+    } catch (reason) {
+      setPageError(reason instanceof Error ? reason.message : "Clip timing could not be saved.");
+    } finally {
+      setClipBusy(false);
+    }
+  };
+
   const importCaptionFile = async (file: File | undefined) => {
     if (!file || !selectedClip) return;
     setPageError(null);
@@ -917,6 +954,27 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
     }
   };
 
+  const importMusicFile = async (file: File | undefined) => {
+    if (!file) return;
+    setClipBusy(true);
+    setPageError(null);
+    try {
+      const query = new URLSearchParams({ filename: file.name });
+      const asset = await api<{ asset_id: string; display_name: string }>(`/api/music/upload?${query.toString()}`, {
+        method: "POST",
+        headers: { "Content-Type": file.type || "application/octet-stream" },
+        body: file,
+      });
+      setRenderOptions((options) => ({ ...options, music_asset_id: asset.asset_id, music_name: asset.display_name }));
+      setMessage(`${asset.display_name} added as the clip music bed.`);
+    } catch (reason) {
+      setPageError(reason instanceof Error ? reason.message : "The music file could not be imported.");
+    } finally {
+      setClipBusy(false);
+      if (musicFileRef.current) musicFileRef.current.value = "";
+    }
+  };
+
   const renderClip = async () => {
     if (!selectedClip) return;
     setClipBusy(true);
@@ -936,6 +994,25 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
     }
   };
 
+  const renderSourceClips = async () => {
+    if (!selectedClip) return;
+    setClipBusy(true);
+    setPageError(null);
+    try {
+      const result = await api<{ jobs: Array<{ id: string | null; status: string; existing: boolean }>; queued: number }>(`/api/recordings/${encodeURIComponent(selectedClip.recording_id)}/clips/render`, {
+        method: "POST",
+        body: JSON.stringify(renderOptions),
+      });
+      setMessage(`${result.queued} clips from this recording queued with the selected style.`);
+      await refresh();
+      onRefresh();
+    } catch (reason) {
+      setPageError(reason instanceof Error ? reason.message : "The recording's clips could not be queued.");
+    } finally {
+      setClipBusy(false);
+    }
+  };
+
   const createClipFromTranscript = async (startSeconds: number) => {
     if (!selectedAnalysisId) return;
     setClipBusy(true);
@@ -947,6 +1024,7 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
       });
       setSelectedClipId(clip.id);
       setCaptionDraft(clip.subtitles.map((segment) => ({ ...segment })));
+      setTrimDraft({ start_seconds: clip.start_seconds, end_seconds: clip.end_seconds });
       setRenderOptions(defaultRenderOptions);
       await refresh();
       setMessage("Transcript passage added to your clip editor. Adjust captions or styling, then render it.");
@@ -1078,6 +1156,10 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
                 {jobs.find((job) => job.clip_id === selectedClip.id && job.status === "failed")?.error_message && <p className="clip-render-error"><AlertTriangle size={13} />{jobs.find((job) => job.clip_id === selectedClip.id && job.status === "failed")?.error_message}</p>}
               </div>
               <div className="clip-caption-editor">
+                <div className="clip-trim-controls">
+                  <div className="clip-trim-heading"><strong>Trim source range</strong><span>Set the in/out points from the original video. Keep the clip between 15 and 45 seconds.</span></div>
+                  <div className="clip-trim-fields"><label>In · source seconds<input type="number" min="0" step="0.1" value={trimDraft.start_seconds} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setTrimDraft((range) => ({ ...range, start_seconds: Number(event.target.value) || 0 }))} /></label><label>Out · source seconds<input type="number" min="0" step="0.1" value={trimDraft.end_seconds} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setTrimDraft((range) => ({ ...range, end_seconds: Number(event.target.value) || 0 }))} /></label><button className="secondary-button" disabled={!trimDraftChanged || clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onClick={() => void saveTrim()}>{clipBusy ? <LoaderCircle size={13} className="spin" /> : <Check size={13} />}Save trim</button></div>
+                </div>
                 <div className="caption-editor-heading"><div><strong>Caption correction</strong><span>Times are relative to this clip.</span></div><div className="caption-heading-actions"><input ref={captionFileRef} className="sr-only" type="file" accept=".srt,.vtt,text/vtt,application/x-subrip" onChange={(event) => void importCaptionFile(event.target.files?.[0])} /><button className="row-action-button" disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onClick={() => captionFileRef.current?.click()}><Upload size={12} /> Import SRT/VTT</button><button className="row-action-button" disabled={captionDraft.length >= 300 || clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status) || (captionDraft.length > 0 && captionDraft[captionDraft.length - 1].end >= selectedClip.end_seconds - selectedClip.start_seconds)} onClick={() => { const clipDuration = selectedClip.end_seconds - selectedClip.start_seconds; const start = captionDraft.length ? captionDraft[captionDraft.length - 1].end : 0; setCaptionDraft((segments) => [...segments, { start, end: Math.min(clipDuration, start + 2), text: "" }]); }}>Add line</button></div></div>
                 {captionDraft.length ? <div className="caption-edit-list">{captionDraft.map((segment, index) => <div className="caption-edit-row" key={`${index}-${segment.start}`}>
                   <div className="caption-time-fields"><label>In<input aria-label={`Caption ${index + 1} start time`} type="number" min="0" max={selectedClip.end_seconds - selectedClip.start_seconds} step="0.1" value={segment.start} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => updateCaption(index, "start", event.target.value)} /></label><label>Out<input aria-label={`Caption ${index + 1} end time`} type="number" min="0.1" max={selectedClip.end_seconds - selectedClip.start_seconds} step="0.1" value={segment.end} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => updateCaption(index, "end", event.target.value)} /></label><button className="icon-button caption-remove" aria-label={`Remove caption ${index + 1}`} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onClick={() => setCaptionDraft((segments) => segments.filter((_item, current) => current !== index))}>×</button></div>
@@ -1086,10 +1168,26 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
                 <div className="render-controls">
                   <label>Frame<select value={renderOptions.aspect_ratio} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, aspect_ratio: event.target.value as RenderOptions["aspect_ratio"] }))}><option value="9:16">9:16 · Shorts</option><option value="1:1">1:1 · Square</option><option value="4:5">4:5 · Portrait</option><option value="16:9">16:9 · Landscape</option></select></label>
                   <label>Layout<select value={renderOptions.layout} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, layout: event.target.value as RenderOptions["layout"] }))}><option value="blur">Blurred fill</option><option value="fit">Fit with bars</option><option value="fill">Crop to fill</option></select></label>
-                  <label>Captions<select value={renderOptions.caption_style} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, caption_style: event.target.value as RenderOptions["caption_style"] }))}><option value="neon">GTA Neon</option><option value="impact">Impact</option><option value="clean">Clean</option><option value="hormozi">Hormozi</option><option value="mrbeast">MrBeast</option></select></label>
+                  <label>Captions<select value={renderOptions.caption_style} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => { const style = event.target.value as RenderOptions["caption_style"]; setRenderOptions((options) => ({ ...options, caption_style: style, caption_font: style === "impact" ? "Impact" : "Arial" })); }}><option value="neon">GTA Neon</option><option value="impact">Impact</option><option value="clean">Clean</option><option value="hormozi">Hormozi</option><option value="mrbeast">MrBeast</option></select></label>
+                  <label>Caption motion<select value={renderOptions.caption_animation} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, caption_animation: event.target.value as RenderOptions["caption_animation"] }))}><option value="static">Static lines</option><option value="word_highlight">Word highlight</option></select></label>
                   <label>Watermark<input maxLength={60} value={renderOptions.watermark_text} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, watermark_text: event.target.value }))} placeholder="Optional creator name" /></label>
+                  <label>Opening hook<input maxLength={100} value={renderOptions.opening_hook} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, opening_hook: event.target.value }))} placeholder="Optional first 2.5 seconds" /></label>
+                  <label>Outro ribbon<input maxLength={100} value={renderOptions.outro_text} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, outro_text: event.target.value }))} placeholder="Optional final 2.5 seconds" /></label>
+                  <label>Caption font<select value={renderOptions.caption_font} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, caption_font: event.target.value as RenderOptions["caption_font"] }))}><option>Arial</option><option>Impact</option><option>Tahoma</option><option>Verdana</option></select></label>
+                  <label>Font size<input type="number" min={24} max={100} value={renderOptions.caption_size} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, caption_size: Math.max(24, Math.min(100, Number(event.target.value) || 24)) }))} /></label>
+                  <label>Words per line<input type="number" min={2} max={12} value={renderOptions.caption_words_per_line} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, caption_words_per_line: Math.max(2, Math.min(12, Number(event.target.value) || 2)) }))} /></label>
+                  <label>Text color<input type="color" value={renderOptions.caption_text_color} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, caption_text_color: event.target.value.toUpperCase() }))} /></label>
+                  <label>Outline color<input type="color" value={renderOptions.caption_outline_color} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, caption_outline_color: event.target.value.toUpperCase() }))} /></label>
                 </div>
-                <div className="clip-editor-actions"><button className="secondary-button" disabled={!captionDraftChanged || clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onClick={() => void saveCaptions()}>{clipBusy ? <LoaderCircle size={13} className="spin" /> : <Check size={13} />}{captionDraftChanged ? "Save captions" : "Captions saved"}</button><button className="primary-button" disabled={clipBusy || captionDraftChanged || ["queued", "rendering", "paused"].includes(selectedClip.status) || (selectedClip.status === "rendered" && !renderSettingsChanged)} onClick={() => void renderClip()}>{clipBusy ? <LoaderCircle size={13} className="spin" /> : selectedClip.status === "rendered" && !renderSettingsChanged ? <Check size={13} /> : <Play size={13} />}{selectedClip.status === "rendered" ? renderSettingsChanged ? "Re-render clip" : "Rendered" : selectedClip.status === "paused" ? "Render paused" : selectedClip.status === "queued" || selectedClip.status === "rendering" ? "Rendering…" : "Render clip"}</button></div>
+                <div className="music-bed-controls">
+                  <input ref={musicFileRef} className="sr-only" type="file" accept="audio/*,.mp3,.m4a,.aac,.wav,.ogg,.flac,.opus" onChange={(event) => void importMusicFile(event.target.files?.[0])} />
+                  <div><strong>Music bed</strong><span>{renderOptions.music_name || "Add a local audio track"}</span></div>
+                  <button className="secondary-button" disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onClick={() => musicFileRef.current?.click()}><Upload size={12} />Choose audio</button>
+                  {renderOptions.music_asset_id && <button className="icon-button" aria-label="Remove music bed" title="Remove music bed" disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onClick={() => setRenderOptions((options) => ({ ...options, music_asset_id: null, music_name: "" }))}>×</button>}
+                  <label>Volume<input type="range" min={0} max={100} value={renderOptions.music_volume} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status) || !renderOptions.music_asset_id} onChange={(event) => setRenderOptions((options) => ({ ...options, music_volume: Number(event.target.value) }))} /><small>{renderOptions.music_volume}%</small></label>
+                  <label>Fade<input type="number" min={0} max={5} step={0.5} value={renderOptions.music_fade_seconds} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status) || !renderOptions.music_asset_id} onChange={(event) => setRenderOptions((options) => ({ ...options, music_fade_seconds: Math.max(0, Math.min(5, Number(event.target.value) || 0)) }))} /><small>seconds</small></label>
+                </div>
+                <div className="clip-editor-actions"><button className="secondary-button" disabled={!captionDraftChanged || clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onClick={() => void saveCaptions()}>{clipBusy ? <LoaderCircle size={13} className="spin" /> : <Check size={13} />}{captionDraftChanged ? "Save captions" : "Captions saved"}</button><button className="secondary-button apply-source-style" disabled={clipBusy || captionDraftChanged || trimDraftChanged || ["queued", "rendering", "paused"].includes(selectedClip.status)} onClick={() => void renderSourceClips()}><Layers3 size={13} /> Apply style to source clips</button><button className="primary-button" disabled={clipBusy || captionDraftChanged || trimDraftChanged || ["queued", "rendering", "paused"].includes(selectedClip.status) || (selectedClip.status === "rendered" && !renderSettingsChanged)} onClick={() => void renderClip()}>{clipBusy ? <LoaderCircle size={13} className="spin" /> : selectedClip.status === "rendered" && !renderSettingsChanged ? <Check size={13} /> : <Play size={13} />}{selectedClip.status === "rendered" ? renderSettingsChanged ? "Re-render clip" : "Rendered" : selectedClip.status === "paused" ? "Render paused" : selectedClip.status === "queued" || selectedClip.status === "rendering" ? "Rendering…" : "Render clip"}</button></div>
                 <section className="metadata-editor" aria-label="Clip metadata">
                 <div className="metadata-editor-heading"><div><div className="section-overline">AI UPLOAD METADATA</div><strong>Title, description & relevant tags</strong><span>Generated from the gameplay context, ready for you to review and edit.</span></div><span className={`clip-state clip-state-${metadata?.status ?? "empty"}`}>{metadata?.status ?? "loading"}</span></div>
                   {!metadata ? <div className="metadata-loading"><LoaderCircle size={14} className="spin" /> Loading saved metadata…</div> : <>

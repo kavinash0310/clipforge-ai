@@ -8,6 +8,10 @@
 - Added transcript search and one-click passage-to-clip creation with the matching caption lines.
 - Added render controls for Shorts, square, portrait, and landscape output; blurred, fit, or crop layouts; five caption styles; and optional creator watermark.
 - Added SRT and WebVTT caption import to the clip editor and isolated per-clip ASS files for concurrent renders.
+- Added source-relative clip trimming with caption adjustment, opening hook overlays, and one-action styling across clips from the same source recording.
+- Added custom caption font, size, colors, and words-per-line controls, plus final outro ribbons.
+- Added locally stored background audio with a volume control and fade-in/fade-out during rendering.
+- Added optional word-highlight caption animation with per-word timing.
 - Documented new editor controls and API routes.
 
 ## Unreleased — batch clips and YouTube scheduling

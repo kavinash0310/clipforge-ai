@@ -23,6 +23,7 @@ from .clip_rendering import subtitle_files
 from .database import (
     create_analysis_job,
     create_render_job,
+    create_render_jobs_for_recording,
     create_youtube_upload_job,
     create_recording,
     create_transcript_clip,
@@ -43,12 +44,13 @@ from .database import (
     save_clip_subtitles,
     save_clip_metadata,
     set_clip_rating,
+    update_clip_range,
     utc_now,
     save_youtube_analytics,
     write_settings,
 )
-from .media import choose_video_file, validate_video_path
-from .source_import import SourceImportError, download_direct_video, save_uploaded_video
+from .media import choose_video_file, validate_audio_path, validate_video_path
+from .source_import import SourceImportError, download_direct_video, save_uploaded_music, save_uploaded_video
 from .system_info import collect_system_info
 from .worker import run_worker
 from .youtube_api import YouTubeAPIError, channel_analytics
@@ -201,10 +203,32 @@ class RenderOptions(BaseModel):
     layout: Literal["blur", "fit", "fill"] = "blur"
     caption_style: Literal["neon", "impact", "clean", "hormozi", "mrbeast"] = "neon"
     watermark_text: str = Field(default="", max_length=60)
+    opening_hook: str = Field(default="", max_length=100)
+    outro_text: str = Field(default="", max_length=100)
+    caption_font: Literal["Arial", "Impact", "Tahoma", "Verdana"] = "Arial"
+    caption_size: int = Field(default=50, ge=24, le=100)
+    caption_text_color: str = Field(default="#FFFFFF", pattern=r"^#[0-9A-Fa-f]{6}$")
+    caption_outline_color: str = Field(default="#351633", pattern=r"^#[0-9A-Fa-f]{6}$")
+    caption_words_per_line: int = Field(default=5, ge=2, le=12)
+    caption_animation: Literal["static", "word_highlight"] = "static"
+    music_asset_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
+    music_name: str = Field(default="", max_length=180)
+    music_volume: int = Field(default=20, ge=0, le=100)
+    music_fade_seconds: float = Field(default=1.5, ge=0, le=5)
 
     @field_validator("watermark_text")
     @classmethod
     def clean_watermark_text(cls, value: str) -> str:
+        return " ".join(value.split())
+
+    @field_validator("opening_hook")
+    @classmethod
+    def clean_opening_hook(cls, value: str) -> str:
+        return " ".join(value.split())
+
+    @field_validator("outro_text")
+    @classmethod
+    def clean_outro_text(cls, value: str) -> str:
         return " ".join(value.split())
 
 
@@ -219,6 +243,19 @@ class TranscriptClipRequest(BaseModel):
 
     start_seconds: float = Field(ge=0, le=86400)
     clip_duration_seconds: int = Field(default=30, ge=15, le=45)
+
+
+class ClipRangeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    start_seconds: float = Field(ge=0, le=86400)
+    end_seconds: float = Field(gt=0, le=86445)
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "ClipRangeRequest":
+        if self.end_seconds <= self.start_seconds:
+            raise ValueError("Clip end time must be after its start time.")
+        return self
 
 
 class MetadataGenerateRequest(BaseModel):
@@ -348,6 +385,21 @@ def rate_clip(clip_id: str, payload: ClipRatingRequest) -> dict[str, Any]:
     return clip
 
 
+@app.patch("/api/clips/{clip_id}/range")
+def trim_clip(clip_id: str, payload: ClipRangeRequest) -> dict[str, Any]:
+    try:
+        clip = update_clip_range(clip_id, payload.start_seconds, payload.end_seconds)
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    if clip is None:
+        raise HTTPException(status_code=404, detail="Clip candidate not found.")
+    return clip
+
+
 @app.post("/api/recordings/{recording_id}/clips/from-transcript", status_code=201)
 def clip_from_transcript(recording_id: str, payload: TranscriptClipRequest) -> dict[str, Any]:
     try:
@@ -371,6 +423,21 @@ def render_clip(clip_id: str, payload: RenderOptions = RenderOptions()) -> dict[
         raise HTTPException(status_code=404, detail=str(error)) from error
     except PermissionError as error:
         raise HTTPException(status_code=403, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.post("/api/recordings/{recording_id}/clips/render", status_code=202)
+def render_recording_clips(recording_id: str, payload: RenderOptions = RenderOptions()) -> dict[str, Any]:
+    try:
+        jobs = create_render_jobs_for_recording(recording_id, payload.model_dump())
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return {"jobs": jobs, "queued": sum(job["status"] == "queued" and not job["existing"] for job in jobs)}
 
 
 @app.patch("/api/clips/{clip_id}/subtitles")
@@ -690,6 +757,18 @@ async def upload_recording(
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     return _register_recording(path, display_name, options)
+
+
+@app.post("/api/music/upload", status_code=201)
+async def upload_music(request: Request, filename: str = Query(min_length=1, max_length=512)) -> dict[str, str]:
+    try:
+        path, display_name = await save_uploaded_music(filename, request.stream())
+        validate_audio_path(str(path))
+    except (SourceImportError, ValueError, RuntimeError) as error:
+        if "path" in locals():
+            path.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return {"asset_id": path.stem, "display_name": display_name}
 
 
 @app.post("/api/recordings/import-link", status_code=202)

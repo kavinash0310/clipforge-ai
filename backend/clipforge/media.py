@@ -7,8 +7,11 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from .config import OUTPUT_DIR
+
 
 VIDEO_EXTENSIONS = {".mp4", ".m4v", ".mkv", ".mov", ".avi", ".webm", ".mpeg", ".mpg"}
+AUDIO_EXTENSIONS = {".mp3", ".m4a", ".aac", ".wav", ".ogg", ".flac", ".opus"}
 
 
 def validate_video_path(path_value: str) -> Path:
@@ -20,6 +23,38 @@ def validate_video_path(path_value: str) -> Path:
     if path.stat().st_size == 0:
         raise ValueError("The selected video file is empty.")
     return path
+
+
+def validate_audio_path(path_value: str) -> Path:
+    path = Path(path_value).expanduser().resolve()
+    if not path.exists() or not path.is_file() or path.suffix.lower() not in AUDIO_EXTENSIONS or path.stat().st_size == 0:
+        raise ValueError("That audio file is unavailable or uses an unsupported format.")
+    executable = shutil.which("ffprobe")
+    if not executable:
+        raise RuntimeError("ffprobe was not found on PATH. Install FFmpeg and restart ClipForge.")
+    result = subprocess.run(
+        [executable, "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(path)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    if result.returncode != 0 or result.stdout.strip() != "audio":
+        raise ValueError("The selected file does not contain a readable audio stream.")
+    return path
+
+
+def resolve_music_asset(asset_id: str) -> Path:
+    import re
+
+    if not re.fullmatch(r"[a-f0-9]{32}", asset_id):
+        raise ValueError("The selected music asset is invalid.")
+    directory = OUTPUT_DIR / "assets" / "music"
+    candidates = list(directory.glob(f"{asset_id}.*"))
+    if len(candidates) != 1:
+        raise ValueError("The selected music file is unavailable. Import it again.")
+    return validate_audio_path(str(candidates[0]))
 
 
 def probe_video(path: Path) -> dict[str, Any]:

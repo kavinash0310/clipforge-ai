@@ -734,6 +734,51 @@ def create_transcript_clip(
     return get_clip(clip_id, database_path)
 
 
+def update_clip_range(
+    clip_id: str,
+    start_seconds: float,
+    end_seconds: float,
+    database_path: Path | None = None,
+) -> dict[str, Any] | None:
+    with database_session(database_path) as connection:
+        clip = connection.execute(
+            "SELECT clips.start_seconds, clips.end_seconds, clips.subtitle_segments_json, clips.status, recordings.duration_seconds, recordings.authorized FROM clips JOIN recordings ON recordings.id = clips.recording_id WHERE clips.id = ?",
+            (clip_id,),
+        ).fetchone()
+        if clip is None:
+            return None
+        if not clip["authorized"]:
+            raise PermissionError("This recording has no authorization confirmation.")
+        active = connection.execute(
+            "SELECT 1 FROM jobs WHERE clip_id = ? AND job_type IN ('render_clip', 'youtube_upload') AND status IN ('queued', 'running', 'paused') LIMIT 1",
+            (clip_id,),
+        ).fetchone()
+        if active is not None or clip["status"] in {"queued", "rendering", "paused"}:
+            raise RuntimeError("Clip timing cannot be changed while a render or YouTube upload is active.")
+        source_duration = float(clip["duration_seconds"] or 0)
+        length = end_seconds - start_seconds
+        if start_seconds < 0 or end_seconds > source_duration + 0.05 or length < 15 or length > 45:
+            raise ValueError("Choose a source range between 15 and 45 seconds inside the recording.")
+        old_start = float(clip["start_seconds"])
+        adjusted = []
+        for segment in json.loads(clip["subtitle_segments_json"]):
+            absolute_start = old_start + float(segment["start"])
+            absolute_end = old_start + float(segment["end"])
+            clipped_start = max(absolute_start, start_seconds)
+            clipped_end = min(absolute_end, end_seconds)
+            if clipped_end > clipped_start:
+                adjusted.append({
+                    "start": round(clipped_start - start_seconds, 3),
+                    "end": round(clipped_end - start_seconds, 3),
+                    "text": segment["text"],
+                })
+        connection.execute(
+            "UPDATE clips SET start_seconds = ?, end_seconds = ?, subtitle_segments_json = ?, status = 'candidate', rendered_at = NULL WHERE id = ?",
+            (round(start_seconds, 3), round(end_seconds, 3), json.dumps(adjusted, ensure_ascii=False), clip_id),
+        )
+    return get_clip(clip_id, database_path)
+
+
 def get_clip_render_input(clip_id: str, database_path: Path | None = None) -> dict[str, Any] | None:
     with database_session(database_path) as connection:
         row = connection.execute(
@@ -787,10 +832,15 @@ def create_render_job(
     clip_id: str,
     database_path: Path | None = None,
     *,
-    render_options: dict[str, str] | None = None,
+    render_options: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     timestamp = utc_now()
-    options = render_options or {"aspect_ratio": "9:16", "layout": "blur", "caption_style": "neon", "watermark_text": ""}
+    options = render_options or {
+        "aspect_ratio": "9:16", "layout": "blur", "caption_style": "neon", "watermark_text": "",
+        "opening_hook": "", "outro_text": "", "caption_font": "Arial", "caption_size": 50,
+        "caption_text_color": "#FFFFFF", "caption_outline_color": "#351633", "caption_words_per_line": 5, "caption_animation": "static",
+        "music_asset_id": None, "music_name": "", "music_volume": 20, "music_fade_seconds": 1.5,
+    }
     with database_session(database_path) as connection:
         clip = connection.execute(
             """
@@ -805,6 +855,12 @@ def create_render_job(
             raise LookupError("Clip candidate not found.")
         if not clip["authorized"]:
             raise PermissionError("The source recording has no authorization confirmation.")
+        active_upload = connection.execute(
+            "SELECT 1 FROM jobs WHERE clip_id = ? AND job_type = 'youtube_upload' AND status IN ('queued', 'running', 'paused') LIMIT 1",
+            (clip_id,),
+        ).fetchone()
+        if active_upload is not None:
+            raise RuntimeError("This clip cannot be replaced while its YouTube upload is active.")
         active = connection.execute(
             "SELECT id, status FROM jobs WHERE clip_id = ? AND job_type = 'render_clip' AND status IN ('queued', 'running', 'paused') ORDER BY created_at DESC LIMIT 1",
             (clip_id,),
@@ -812,7 +868,12 @@ def create_render_job(
         if active is not None:
             return {"id": active["id"], "clip_id": clip_id, "status": active["status"], "existing": True}
         rendered_metadata = json.loads(clip["render_metadata_json"] or "{}")
-        current_options = rendered_metadata.get("settings") or {"aspect_ratio": "9:16", "layout": "blur", "caption_style": "neon", "watermark_text": ""}
+        current_options = rendered_metadata.get("settings") or {
+            "aspect_ratio": "9:16", "layout": "blur", "caption_style": "neon", "watermark_text": "",
+            "opening_hook": "", "outro_text": "", "caption_font": "Arial", "caption_size": 50,
+            "caption_text_color": "#FFFFFF", "caption_outline_color": "#351633", "caption_words_per_line": 5, "caption_animation": "static",
+            "music_asset_id": None, "music_name": "", "music_volume": 20, "music_fade_seconds": 1.5,
+        }
         if clip["status"] == "rendered" and clip["file_path"] and Path(clip["file_path"]).is_file() and current_options == options:
             return {"id": None, "clip_id": clip_id, "status": "rendered", "existing": True}
         job_id = f"job-{uuid.uuid4().hex}"
@@ -822,6 +883,24 @@ def create_render_job(
         )
         connection.execute("UPDATE clips SET status = 'queued' WHERE id = ?", (clip_id,))
     return {"id": job_id, "clip_id": clip_id, "status": "queued", "existing": False}
+
+
+def create_render_jobs_for_recording(
+    recording_id: str,
+    render_options: dict[str, Any],
+    database_path: Path | None = None,
+) -> list[dict[str, Any]]:
+    with database_session(database_path) as connection:
+        recording = connection.execute("SELECT authorized FROM recordings WHERE id = ?", (recording_id,)).fetchone()
+        if recording is None:
+            raise LookupError("Recording not found.")
+        if not recording["authorized"]:
+            raise PermissionError("This recording has no authorization confirmation.")
+        clips = connection.execute(
+            "SELECT clips.id FROM clips WHERE clips.recording_id = ? AND NOT EXISTS (SELECT 1 FROM jobs WHERE jobs.clip_id = clips.id AND jobs.job_type = 'youtube_upload' AND jobs.status IN ('queued', 'running', 'paused')) ORDER BY clips.start_seconds",
+            (recording_id,),
+        ).fetchall()
+    return [create_render_job(row["id"], database_path, render_options=render_options) for row in clips]
 
 
 def create_youtube_upload_job(
@@ -879,7 +958,7 @@ def save_clip_subtitles(clip_id: str, subtitles: list[dict[str, Any]], database_
         if clip is None:
             return None
         active_render = connection.execute(
-            "SELECT 1 FROM jobs WHERE clip_id = ? AND job_type = 'render_clip' AND status IN ('queued', 'running', 'paused') LIMIT 1",
+            "SELECT 1 FROM jobs WHERE clip_id = ? AND job_type IN ('render_clip', 'youtube_upload') AND status IN ('queued', 'running', 'paused') LIMIT 1",
             (clip_id,),
         ).fetchone()
         if clip["status"] in {"queued", "rendering", "paused"} or active_render is not None:
