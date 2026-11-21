@@ -8,7 +8,7 @@ The readiness card reports FFmpeg, NVIDIA GPU, faster-whisper, and Ollama availa
 
 ## Generate captioned clips
 
-1. Open Media library and choose a local video or paste its path. YouTube watch links are not imported or downloaded.
+1. Open Media library and choose a local video or paste its path. To clip your own YouTube upload, download its MP4 from [YouTube Studio](https://studio.youtube.com) first; ClipForge does not download watch links.
 2. Confirm that you own the recording or are authorized to use it. ClipForge reads the source path and does not overwrite or copy the original.
 3. Choose how many clips to create (1–100, default 1) and a duration (15, 30, or 45 seconds).
 4. Wait for inspection to finish, then choose **Analyze**. On first use, faster-whisper downloads the selected model into app data. Transcription and moment ranking run locally.

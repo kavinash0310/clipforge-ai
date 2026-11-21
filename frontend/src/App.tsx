@@ -839,7 +839,7 @@ function MediaPage({ onRefresh }: { onRefresh: () => void }) {
       <section className="surface-card import-card">
         <div className="import-card-header">
           <div className="import-icon"><Upload size={18} /></div>
-          <div><div className="section-overline">ADD LOCAL RECORDING</div><h3>Bring a session into your studio</h3><p>Choose a local file or paste its path. ClipForge does not download videos from YouTube links.</p></div>
+          <div><div className="section-overline">ADD LOCAL RECORDING</div><h3>Bring a session into your studio</h3><p>Choose a local file or paste its path. For your own YouTube uploads, <a href="https://studio.youtube.com" target="_blank" rel="noreferrer">download the MP4 in YouTube Studio</a>, then import it here. ClipForge does not download watch links.</p></div>
         </div>
         <form onSubmit={(event) => void importRecording(event)}>
           <div className="path-entry-row">
