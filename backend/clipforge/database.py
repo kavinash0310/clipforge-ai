@@ -319,6 +319,9 @@ def create_analysis_job(
     clip_count: int = 1,
     clip_duration_seconds: int = 30,
     moment_mix: str = "balanced",
+    transcription_language: str = "auto",
+    render_options: dict[str, Any] | None = None,
+    focus_prompt: str = "",
 ) -> dict[str, Any]:
     timestamp = utc_now()
     with database_session(database_path) as connection:
@@ -345,6 +348,9 @@ def create_analysis_job(
             "clip_count": max(1, min(int(clip_count), 100)),
             "clip_duration_seconds": max(15, min(int(clip_duration_seconds), 45)),
             "moment_mix": moment_mix if moment_mix in {"balanced", "action", "dialogue"} else "balanced",
+            "transcription_language": transcription_language,
+            "render_options": render_options or {},
+            "focus_prompt": focus_prompt[:160],
             "auto_process": True,
         })
         connection.execute(
@@ -381,6 +387,17 @@ def list_recordings() -> list[dict[str, Any]]:
         item["metadata"] = json.loads(item.pop("metadata_json")) if item.get("metadata_json") else None
         results.append(item)
     return results
+
+
+def get_recording_source(recording_id: str, database_path: Path | None = None) -> dict[str, Any] | None:
+    with database_session(database_path) as connection:
+        row = connection.execute(
+            "SELECT file_path, authorized FROM recordings WHERE id = ?",
+            (recording_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    return {"file_path": row["file_path"], "authorized": bool(row["authorized"])}
 
 
 def list_jobs(limit: int = 30) -> list[dict[str, Any]]:
@@ -516,7 +533,7 @@ def save_analysis_result(recording_id: str, result: dict[str, Any], candidates: 
         "audio_profile": profile,
         "candidate_count": len(candidates),
         "scoring": {
-            "method": "deterministic weighted signals",
+            "method": "weighted audio, transcript, and scene signals with an optional focus-phrase boost",
             "weights": {"audio_energy": 0.34, "speech_context": 0.24, "excitement_cues": 0.27, "scene_changes": 0.15},
         },
     }
@@ -836,7 +853,8 @@ def create_render_job(
 ) -> dict[str, Any]:
     timestamp = utc_now()
     options = render_options or {
-        "aspect_ratio": "9:16", "layout": "blur", "caption_style": "neon", "watermark_text": "",
+        "aspect_ratio": "9:16", "format_preset": "youtube_shorts", "resolution": 1080, "frame_rate": "source",
+        "layout": "blur", "caption_style": "neon", "watermark_text": "",
         "opening_hook": "", "outro_text": "", "caption_font": "Arial", "caption_size": 50,
         "caption_text_color": "#FFFFFF", "caption_outline_color": "#351633", "caption_words_per_line": 5, "caption_animation": "static",
         "music_asset_id": None, "music_name": "", "music_volume": 20, "music_fade_seconds": 1.5,
@@ -869,7 +887,8 @@ def create_render_job(
             return {"id": active["id"], "clip_id": clip_id, "status": active["status"], "existing": True}
         rendered_metadata = json.loads(clip["render_metadata_json"] or "{}")
         current_options = rendered_metadata.get("settings") or {
-            "aspect_ratio": "9:16", "layout": "blur", "caption_style": "neon", "watermark_text": "",
+            "aspect_ratio": "9:16", "format_preset": "youtube_shorts", "resolution": 1080, "frame_rate": "source",
+            "layout": "blur", "caption_style": "neon", "watermark_text": "",
             "opening_hook": "", "outro_text": "", "caption_font": "Arial", "caption_size": 50,
             "caption_text_color": "#FFFFFF", "caption_outline_color": "#351633", "caption_words_per_line": 5, "caption_animation": "static",
             "music_asset_id": None, "music_name": "", "music_volume": 20, "music_fade_seconds": 1.5,

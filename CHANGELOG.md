@@ -3,6 +3,12 @@
 ## Unreleased — Neon-inspired clip studio
 
 - Reworked the studio palette to orchid, hot pink, and cyan with brighter accents and matching editor surfaces.
+- Added the workflow stages **Make it your format**, **Frame your moment**, **Give it a voice**, and **Style & extras**, with platform aspect presets, 720p/1080p/4K output, source/24/30/60 fps, more crop/blur positions, transcription language, caption presets, hooks, creator marks, and music beds.
+- Added an optional transcript phrase boost for highlight ranking and ASS subtitle-file import alongside SRT/WebVTT.
+- Added source-video review with a 9:16 safe-area guide and I/O/Space trim shortcuts.
+- Added an **Upload all privately** batch action beside YouTube scheduling and the existing all-clips download.
+- Added live local-stream capture with a rolling segment buffer, 15/30/45-second clips, status polling, and automatic queuing into transcription, highlight selection, captioning, and rendering.
+- Added loopback-only RTMP/SRT/UDP validation for live input and capture shutdown on app exit.
 - Added a searchable My clips library with ready/in-progress filters, individual/ZIP downloads, direct editor links, and saved one-to-five star ratings.
 - Added Balanced, Action, and Dialogue moment scoring mixes to upload, local-path, direct-file-link, and re-analysis flows.
 - Added transcript search and one-click passage-to-clip creation with the matching caption lines.

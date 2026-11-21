@@ -165,6 +165,7 @@ def transcribe_recording(
     source: Path,
     recording_id: str,
     model_name: str,
+    language: str | None,
     cpu_threads: int,
     progress: Callable[[int, int, str], None],
     check_cancel: Callable[[], None],
@@ -196,6 +197,7 @@ def transcribe_recording(
         generated, info = model.transcribe(
             str(wav_path),
             beam_size=3,
+            language=language,
             vad_filter=True,
             word_timestamps=False,
             condition_on_previous_text=False,

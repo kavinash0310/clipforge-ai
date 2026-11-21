@@ -8,6 +8,15 @@ Generated MP4 and SRT files are written under `CLIPFORGE_OUTPUT_DIR` when config
 
 Returns service name, version, and status. Does not expose local paths.
 
+## Live capture routes
+
+- `GET /api/live/status` reports whether a local stream capture is running and the number of buffered five-second segments.
+- `POST /api/live/start` accepts `{"source_url":"rtmp://127.0.0.1:1935/live/clipforge"}`. Input must use RTMP, SRT, or UDP and resolve to `localhost`, `127.0.0.1`, or `::1`. A local ingest service must publish the stream to the configured endpoint.
+- `POST /api/live/stop` stops capture and leaves the recent buffer available for clipping.
+- `POST /api/live/clip` accepts `{"duration_seconds":30,"transcription_language":"auto","render_options":{...}}` with a duration of 15, 30, or 45 seconds. It creates a local recording and queues the standard AI analysis and render workflow.
+
+The live capture does not download or extract public platform watch pages. The rolling buffer is bounded to the latest 36 completed segments (about three minutes).
+
 ## `GET /api/overview`
 
 Returns SQLite-derived totals for recordings, ready recordings, clips, active and failed jobs, completed publications, plus the six most recently updated jobs. `updated_at` is the time the snapshot was generated.
@@ -22,15 +31,15 @@ Returns source paths, metadata, state, authorization confirmation, and transcrip
 
 ## `POST /api/recordings`
 
-Accepts a local `path`, `authorized: true`, and optional `auto_analyze`, `clip_count` (1–100), `clip_duration_seconds` (15–45), and `moment_mix` (`balanced`, `action`, or `dialogue`). When `auto_analyze` is true, inspection queues analysis automatically when the file is ready. The service verifies that the file exists and uses a supported video extension. Duplicate paths return `409`; absent authorization returns `400`.
+Accepts a local `path`, `authorized: true`, and optional `auto_analyze`, `clip_count` (1–100), `clip_duration_seconds` (15–45), `moment_mix` (`balanced`, `action`, or `dialogue`), `transcription_language`, `render_options`, and `focus_prompt` (up to 160 characters). A focus phrase gives transcript windows with matching words a small ranking boost. When `auto_analyze` is true, inspection queues analysis automatically when the file is ready. The service verifies that the file exists and uses a supported video extension. Duplicate paths return `409`; absent authorization returns `400`.
 
 ## `POST /api/recordings/upload`
 
-Accepts the raw video file as the request body and query parameters `filename`, `authorized=true`, `auto_analyze=true`, `clip_count=1`, `clip_duration_seconds=30`, and `moment_mix=balanced`. Supported files are MP4, M4V, MKV, MOV, AVI, MPEG, and WebM, up to 20 GB. The uploaded source is stored in `CLIPFORGE_OUTPUT_DIR\sources` (or the default output directory) before inspection.
+Accepts the raw video file as the request body and query parameters `filename`, `authorized=true`, `auto_analyze=true`, `clip_count=1`, `clip_duration_seconds=30`, and `moment_mix=balanced`, plus `transcription_language`, `render_options` (JSON-encoded), and `focus_prompt`. Supported files are MP4, M4V, MKV, MOV, AVI, MPEG, and WebM, up to 20 GB. The uploaded source is stored in `CLIPFORGE_OUTPUT_DIR\sources` (or the default output directory) before inspection.
 
 ## `POST /api/recordings/import-link`
 
-Accepts `{"url":"https://host/video.mp4","authorized":true,"auto_analyze":true,"clip_count":1,"clip_duration_seconds":30,"moment_mix":"balanced"}`. The link must be public HTTP(S) and return a direct video file; local/private network addresses, webpages, and playlists are rejected. Redirects are checked before each request and the source is capped at 20 GB. Platform watch pages such as YouTube, Twitch, and Kick are not direct media-file URLs.
+Accepts `{"url":"https://host/video.mp4","authorized":true,"auto_analyze":true,"clip_count":1,"clip_duration_seconds":30,"moment_mix":"balanced","transcription_language":"auto","render_options":{...},"focus_prompt":"ranked comeback"}`. The link must be public HTTP(S) and return a direct video file; local/private network addresses, webpages, and playlists are rejected. Redirects are checked before each request and the source is capped at 20 GB. Platform watch pages such as YouTube, Twitch, and Kick are not direct media-file URLs.
 
 ## `POST /api/recordings/browse`
 
@@ -42,11 +51,15 @@ Accepts raw MP3, M4A, AAC, WAV, OGG, FLAC, or OPUS audio with a `filename` query
 
 ## `POST /api/recordings/{recording_id}/analyze`
 
-Accepts `{"clip_count":1,"clip_duration_seconds":30,"moment_mix":"balanced"}`; count is 1–100 (default 1), duration is 15–45 seconds (default 30), and moment mix is `balanced`, `action`, or `dialogue`. Queues local transcription and highlight analysis for an inspected, authorized recording, then automatically queues a vertical render and metadata generation for each returned candidate. Repeated requests return the existing active analysis job. The requested count is a maximum because low-signal sources may yield fewer candidates.
+Accepts `{"clip_count":1,"clip_duration_seconds":30,"moment_mix":"balanced","transcription_language":"auto","render_options":{...},"focus_prompt":"ranked comeback"}`; count is 1–100 (default 1), duration is 15–45 seconds (default 30), and moment mix is `balanced`, `action`, or `dialogue`. `transcription_language` accepts `auto`, `en`, `hi`, `es`, `fr`, `de`, `pt`, `ja`, `ko`, `zh`, `it`, `ru`, or `ar`. A focus phrase (up to 160 characters) gives transcript windows with matching words a small ranking boost. Queues local transcription and highlight analysis for an inspected, authorized recording, then automatically queues a render in the requested format and metadata generation for each returned candidate. Repeated requests return the existing active analysis job. The requested count is a maximum because low-signal sources may yield fewer candidates.
 
 ## `GET /api/recordings/{recording_id}/analysis`
 
 Returns transcript segments, analysis summary, candidate scores, timestamps, reason labels, signal breakdowns, per-candidate editable captions, and render status/metadata.
+
+## `GET /api/recordings/{recording_id}/source-preview`
+
+Streams the authorized local source file for in-browser scene review. The response is served from the stored recording path after the file extension and authorization state are checked.
 
 ## `POST /api/recordings/{recording_id}/clips/from-transcript`
 
@@ -70,7 +83,7 @@ Saves clip-relative caption edits. `segments` is an array of `{ "start": 0.0, "e
 
 ## `POST /api/clips/{clip_id}/render`
 
-Accepts optional render settings: `aspect_ratio` (`9:16`, `1:1`, `4:5`, `16:9`), `layout` (`blur`, `fit`, `fill`), `caption_style` (`neon`, `impact`, `clean`, `hormozi`, `mrbeast`), `caption_animation` (`static`, `word_highlight`), `watermark_text` (up to 60 characters), `opening_hook` and `outro_text` (up to 100 characters each), `caption_font` (`Arial`, `Impact`, `Tahoma`, `Verdana`), `caption_size` (24–100), `caption_text_color` and `caption_outline_color` (hex colors), `caption_words_per_line` (2–12), `music_asset_id` (optional ID returned from music upload), `music_volume` (0–100), and `music_fade_seconds` (0–5). Queues a local render for an authorized candidate. FFmpeg trims the source timestamps and burns in captions/overlays; music is mixed with source audio and faded at both ends. Re-rendering uses the selected settings; the source recording is read-only.
+Accepts optional render settings: `aspect_ratio` (`9:16`, `1:1`, `4:5`, `16:9`), `format_preset` (`youtube_shorts`, `tiktok`, `instagram_reels`, `instagram_portrait`, `square`, `landscape`, `custom`), `resolution` (`720`, `1080`, `2160`), `frame_rate` (`source`, `24`, `30`, `60`), `layout` (`blur`, `blur_top`, `blur_bottom`, `fit`, `fill`, `fill_top`, `fill_bottom`), `caption_style` (`neon`, `impact`, `clean`, `hormozi`, `mrbeast`), `caption_animation` (`static`, `word_highlight`), `watermark_text` (up to 60 characters), `opening_hook` and `outro_text` (up to 100 characters each), `caption_font` (`Arial`, `Impact`, `Tahoma`, `Verdana`), `caption_size` (24–100), `caption_text_color` and `caption_outline_color` (hex colors), `caption_words_per_line` (2–12), `music_asset_id` (optional ID returned from music upload), `music_volume` (0–100), and `music_fade_seconds` (0–5). Queues a local render for an authorized candidate. FFmpeg trims the source timestamps and burns in captions/overlays; music is mixed with source audio and faded at both ends. Re-rendering uses the selected settings; the source recording is read-only.
 
 ## `PATCH /api/clips/{clip_id}/range`
 

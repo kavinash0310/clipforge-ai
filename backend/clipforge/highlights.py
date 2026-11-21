@@ -11,6 +11,11 @@ EXCITEMENT_TERMS = {
     "what", "wow", "unbelievable", "crazy", "bruh", "gg", "laugh",
     "laughing", "haha", "lmao", "lol", "sick", "got him", "one shot",
 }
+FOCUS_STOP_WORDS = {"and", "for", "the", "that", "this", "with", "from", "into", "about", "clip", "clips", "video", "moment"}
+
+
+def _focus_words(value: str) -> set[str]:
+    return set(re.findall(r"[^\W_]{2,}", value.lower(), flags=re.UNICODE))
 
 
 def _normal_time(value: float) -> float:
@@ -52,6 +57,7 @@ def generate_highlights(
     max_candidates: int = 5,
     window_seconds: float = 30.0,
     moment_mix: str = "balanced",
+    focus_prompt: str = "",
 ) -> list[dict[str, Any]]:
     """Rank context-preserving candidate windows from audio, transcript, and scene signals."""
     duration = max(0.0, duration_seconds)
@@ -78,6 +84,7 @@ def generate_highlights(
 
     global_speech = sum(max(0.0, float(s["end"]) - float(s["start"])) for s in transcript_segments)
     global_speech_density = min(1.0, global_speech / duration)
+    focus_terms = _focus_words(focus_prompt) - FOCUS_STOP_WORDS
     candidates: list[dict[str, Any]] = []
     for start in starts:
         end = min(duration, start + window)
@@ -115,6 +122,9 @@ def generate_highlights(
             + weights[2] * excitement_signal
             + weights[3] * scene_signal
         )
+        focus_matches = focus_terms.intersection(_focus_words(text))
+        focus_signal = min(1.0, len(focus_matches) / max(1, min(3, len(focus_terms)))) if focus_terms else 0.0
+        score = min(100.0, score + 12.0 * focus_signal)
         if score < 22 or (not local_segments and not local_cuts and energy_signal < 0.18):
             continue
 
@@ -127,6 +137,8 @@ def generate_highlights(
             reasons.append("Several scene changes")
         if speech_density >= 0.12:
             reasons.append("Clear spoken context")
+        if focus_signal >= 0.34:
+            reasons.append("Focus phrase match")
         if not reasons:
             reasons.append("Combined audio and scene activity")
 

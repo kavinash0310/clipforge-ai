@@ -10,10 +10,14 @@ The readiness card reports FFmpeg, NVIDIA GPU, faster-whisper, and Ollama availa
 
 1. Open **Create clips** and choose **Upload video**, **Paste a link**, or **Local path**. Uploads and direct media-file links are copied into the configured output folder's `sources` directory; local paths are read in place. A link must return a video file directly (MP4, MKV, MOV, AVI, MPEG, or WebM). YouTube, Twitch, and Kick watch pages are not direct video files. For your own YouTube upload, download its MP4 from [YouTube Studio](https://studio.youtube.com) first.
 2. Confirm that you own the recording or are authorized to use it.
-3. Choose how many clips to create (1–100, default 1), a duration (15, 30, or 45 seconds), and a moment mix: **Balanced**, **Action**, or **Dialogue**. Then choose **Make clips**. Inspection starts first, then ClipForge queues analysis automatically.
+3. In **02 · Make it your format**, choose 1–100 clips, the target length, platform frame, 720p/1080p/4K resolution, and source/24/30/60 fps. Optionally enter a topic phrase to rank moments with matching transcript words higher. In **03 · Frame your moment**, choose Balanced, Action, or Dialogue and a blur, fit, or crop position. In **04 · Give it a voice**, choose a spoken language or auto-detect, caption style, and caption motion. In **05 · Style & extras**, optionally add a hook, outro, watermark, or local music bed. Then choose **Make clips**. Inspection starts first, then ClipForge queues analysis automatically.
 4. On first use, faster-whisper downloads the selected model into app data. Transcription and moment ranking run locally. Open **View results** to review ranked highlights, search the transcript, or choose **Clip here** to make a clip around a passage.
-5. ClipForge queues vertical renders with captions and generates a title, description, hashtags, and relevant search tags for each result.
-6. In the clip editor, adjust source in/out points; import SRT/WebVTT captions or edit lines; and set the frame, layout, caption look, font, size, colors, words per line, and static or word-highlight motion. Add an opening hook, outro ribbon, watermark, or local music bed with volume and fade controls. Select **Render clip**; a changed style can be rendered again. Choose **Apply style to source clips** to re-render every candidate from that recording with the selected styling.
+5. ClipForge queues renders in the selected format with captions and generates a title, description, hashtags, and relevant search tags for each result.
+6. In the clip editor, review the source frame with the centered 9:16 safe-area guide. Set in/out points from the playhead with **I**, **O**, or the buttons; Space plays or pauses. Import SRT/ASS/WebVTT captions or edit lines; set the frame, resolution, frame rate, layout, caption look, font, size, colors, words per line, and static or word-highlight motion. Add an opening hook, outro ribbon, watermark, or local music bed with volume and fade controls. Select **Render clip**; a changed style can be rendered again. Choose **Apply style to source clips** to re-render every candidate from that recording with the selected styling.
+
+## Live clipping
+
+Open **Live clipping** and enter a stream endpoint on this PC, such as `rtmp://127.0.0.1:1935/live/clipforge`. Start a local RTMP/SRT/UDP ingest service and configure OBS or another encoder to publish to that endpoint. ClipForge keeps a short rolling buffer, lets you capture the last 15, 30, or 45 seconds, then queues that file for transcription, highlight detection, captions, formatting, and metadata. The live page shows buffered seconds and lets you stop capture while retaining the recent buffer. Capture input is limited to localhost. It does not connect to public Twitch or YouTube live watch pages.
 
 Moment scores rank audio peaks, speech, excitement cues, and scene changes. The selected moment mix changes how those signals are weighted. The requested count is a maximum; a source may produce fewer clips when moments do not meet the signal threshold. Candidates shorter than the requested duration can occur when the source itself is shorter.
 
@@ -31,7 +35,7 @@ In the YouTube page, use **Download** beside one clip or **Download all** to sav
 2. Set the start date and time. The default is the next 15 minutes; choose a later date, including a date next week, when needed.
 3. Choose **Schedule** on one clip to queue it at the selected start time. Scheduled videos are uploaded as private and YouTube publishes them at the chosen time.
 4. Choose **Schedule all ready** to queue every rendered clip that has finished metadata generation. The first uses the selected time; each following upload uses the selected interval (default 90 minutes).
-5. Use **Upload privately** for an immediate private upload. Use **Retry upload** after a failed transfer to resume its existing YouTube upload.
+5. Use **Upload privately** for an immediate private upload, or **Upload all privately** to queue every ready clip at once. Use **Retry upload** after a failed transfer to resume its existing YouTube upload.
 
 Times use your computer's local timezone. The first scheduled time must be at least 15 minutes in the future. YouTube can apply channel and API upload limits, so a batch of 100 may need to be spread across multiple days.
 

@@ -177,9 +177,18 @@ def render_vertical_clip(
     music_volume = max(0, min(int(options.get("music_volume", 20)), 100)) / 100
     music_fade_seconds = max(0.0, min(float(options.get("music_fade_seconds", 1.5)), 5.0))
     dimensions = {"9:16": (1080, 1920), "1:1": (1080, 1080), "4:5": (1080, 1350), "16:9": (1920, 1080)}
-    if aspect_ratio not in dimensions or layout not in {"blur", "fit", "fill"} or caption_style not in CAPTION_STYLES:
+    supported_layouts = {"blur", "blur_top", "blur_bottom", "fit", "fill", "fill_top", "fill_bottom"}
+    resolution = int(options.get("resolution", 1080))
+    frame_rate = options.get("frame_rate", "source")
+    if resolution not in {720, 1080, 2160}:
+        raise ValueError("Choose 720p, 1080p, or 2160p output resolution.")
+    if frame_rate not in {"source", 24, 30, 60}:
+        raise ValueError("Choose the source frame rate, 24, 30, or 60 fps.")
+    if aspect_ratio not in dimensions or layout not in supported_layouts or caption_style not in CAPTION_STYLES:
         raise ValueError("The selected output format or caption style is not supported.")
-    width, height = dimensions[aspect_ratio]
+    base_width, base_height = dimensions[aspect_ratio]
+    scale = resolution / 1080
+    width, height = round(base_width * scale), round(base_height * scale)
     duration = end_seconds - start_seconds
     if start_seconds < 0 or duration <= 0 or duration > 600:
         raise ValueError("A rendered clip must be between 0 and 600 seconds long.")
@@ -214,18 +223,21 @@ def render_vertical_clip(
     check_cancel()
     progress(22, "rendering_vertical")
 
-    if layout == "blur":
+    if layout in {"blur", "blur_top", "blur_bottom"}:
+        foreground_y = "0" if layout == "blur_top" else "H-h" if layout == "blur_bottom" else "(H-h)/2"
         framing = (
             f"[0:v]split=2[bg][fg];[bg]scale={width}:{height}:force_original_aspect_ratio=increase,"
             f"crop={width}:{height},boxblur=24:8[bgv];[fg]scale={width}:{height}:"
             "force_original_aspect_ratio=decrease:force_divisible_by=2[fgv];"
-            "[bgv][fgv]overlay=(W-w)/2:(H-h)/2[framed];"
+            f"[bgv][fgv]overlay=(W-w)/2:{foreground_y}[framed];"
         )
     elif layout == "fit":
         framing = f"[0:v]scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black[framed];"
     else:
-        framing = f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}[framed];"
-    filter_graph = f"{framing}[framed]fps=30,subtitles=filename='{ass_path.name}'[v]"
+        crop_y = "0" if layout == "fill_top" else f"in_h-{height}" if layout == "fill_bottom" else f"(in_h-{height})/2"
+        framing = f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}:(in_w-{width})/2:{crop_y}[framed];"
+    frame_rate_filter = "" if frame_rate == "source" else f"fps={frame_rate},"
+    filter_graph = f"{framing}[framed]{frame_rate_filter}subtitles=filename='{ass_path.name}'[v]"
     input_command = [
         ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
         "-filter_complex_threads", str(thread_count),
@@ -306,7 +318,8 @@ def render_vertical_clip(
             "height": video["height"],
             "codec": video.get("codec"),
             "settings": {
-                "aspect_ratio": aspect_ratio, "layout": layout, "caption_style": caption_style,
+                "aspect_ratio": aspect_ratio, "format_preset": options.get("format_preset", "youtube_shorts"),
+                "resolution": resolution, "frame_rate": frame_rate, "layout": layout, "caption_style": caption_style,
                 "watermark_text": watermark_text, "opening_hook": opening_hook, "outro_text": outro_text,
                 "caption_font": caption_font,
                 "caption_size": caption_size, "caption_text_color": caption_text_color,

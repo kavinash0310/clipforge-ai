@@ -4,7 +4,7 @@ ClipForge AI is a local-first gaming content studio for turning recordings you o
 
 ## Current status
 
-Phase 1 is complete: dashboard, saved settings, database foundation, and hardware checks. Phase 3 is complete: authorized recording import, FFmpeg inspection, faster-whisper transcription, SRT output, and ranked highlight analysis. Phase 4 is complete: source-time trimming, clip editing, configurable aspect ratios/layouts, five caption looks, custom caption font/size/color/line length, static or word-highlight captions, imported SRT/WebVTT captions, opening hooks, outro ribbons, creator watermarks, optional faded music beds, and local preview/download. The studio also includes transcript search and passage clipping, action/dialogue/balanced moment ranking, source-wide style application, a searchable My Clips library with ratings and batch download, local metadata generation, YouTube scheduling, and a colorful orchid/cyan visual theme. The create workflow accepts uploaded files, local paths, and direct video-file URLs, then queues analysis automatically after inspection. YouTube/Twitch/Kick watch pages and live streams are not imported as media files. Dashboard totals are queried from SQLite, so a fresh database shows zero activity rather than sample metrics.
+The studio includes a dashboard, searchable My Clips library, local transcription and highlight ranking, editing, caption styles, YouTube metadata and scheduling, batch downloads/uploads, and a colorful orchid/pink/cyan UI. The Create workflow has separate format, framing, voice, and extras stages: platform presets, 720p/1080p/4K output, source or 24/30/60 fps, crop/blur/fit positioning, transcription language, topic phrase matching, caption style, hooks, outro text, creator mark, and an optional local music bed flow into automatic renders. Live clipping captures a rolling buffer from a local RTMP, SRT, or UDP stream and queues clips for the same AI workflow. Public platform watch pages and third-party live-stream extraction are not supported; use footage you own or are authorized to process. Dashboard totals come from SQLite, so a fresh database shows zero activity instead of sample metrics.
 
 ## Run in development
 
@@ -47,7 +47,7 @@ python -m unittest discover -s backend/tests -v
 npm --prefix frontend run build
 ```
 
-The current verification passed 31 backend tests, the TypeScript/Vite production build, Python compilation, a full mocked API/worker workflow, and a real synthetic FFmpeg render. A live YouTube connection requires a user-provided Desktop OAuth client file and Google account consent.
+Earlier project verification passed the existing backend suite, production UI build, mocked API/worker flow, and a synthetic FFmpeg render. The newly added format and live-capture workflow has not been run through those checks yet. A YouTube connection requires a user-provided Desktop OAuth client file and Google account consent.
 
 See [INSTALLATION.md](INSTALLATION.md) for setup and custom output paths, [USER_GUIDE.md](USER_GUIDE.md) for the workflow, and [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for completed phases.
 

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import mimetypes
 import os
 import tempfile
 import zipfile
@@ -30,6 +32,7 @@ from .database import (
     get_clip_metadata,
     get_clip_render_input,
     get_clip_youtube_upload_input,
+    get_recording_source,
     get_recording_analysis,
     get_job,
     initialize_database,
@@ -50,6 +53,7 @@ from .database import (
     write_settings,
 )
 from .media import choose_video_file, validate_audio_path, validate_video_path
+from .live_capture import live_capture, validate_local_stream_url
 from .source_import import SourceImportError, download_direct_video, save_uploaded_music, save_uploaded_video
 from .system_info import collect_system_info
 from .worker import run_worker
@@ -113,6 +117,19 @@ class RecordingImportOptions(BaseModel):
     clip_count: int = Field(default=1, ge=1, le=100)
     clip_duration_seconds: int = Field(default=30, ge=15, le=45)
     moment_mix: Literal["balanced", "action", "dialogue"] = "balanced"
+    transcription_language: Literal["auto", "en", "hi", "es", "fr", "de", "pt", "ja", "ko", "zh", "it", "ru", "ar"] = "auto"
+    render_options: dict[str, Any] = Field(default_factory=dict)
+    focus_prompt: str = Field(default="", max_length=160)
+
+    @field_validator("render_options")
+    @classmethod
+    def normalize_render_options(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return RenderOptions.model_validate(value).model_dump()
+
+    @field_validator("focus_prompt")
+    @classmethod
+    def clean_focus_prompt(cls, value: str) -> str:
+        return " ".join(value.split())
 
 
 class RecordingImport(RecordingImportOptions):
@@ -134,6 +151,19 @@ class AnalyzeRecordingRequest(BaseModel):
     clip_count: int = Field(default=1, ge=1, le=100)
     clip_duration_seconds: int = Field(default=30, ge=15, le=45)
     moment_mix: Literal["balanced", "action", "dialogue"] = "balanced"
+    transcription_language: Literal["auto", "en", "hi", "es", "fr", "de", "pt", "ja", "ko", "zh", "it", "ru", "ar"] = "auto"
+    render_options: dict[str, Any] = Field(default_factory=dict)
+    focus_prompt: str = Field(default="", max_length=160)
+
+    @field_validator("render_options")
+    @classmethod
+    def normalize_render_options(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return RenderOptions.model_validate(value).model_dump()
+
+    @field_validator("focus_prompt")
+    @classmethod
+    def clean_focus_prompt(cls, value: str) -> str:
+        return " ".join(value.split())
 
 
 class DownloadClipsRequest(BaseModel):
@@ -200,7 +230,10 @@ class RenderOptions(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     aspect_ratio: Literal["9:16", "1:1", "4:5", "16:9"] = "9:16"
-    layout: Literal["blur", "fit", "fill"] = "blur"
+    layout: Literal["blur", "blur_top", "blur_bottom", "fit", "fill", "fill_top", "fill_bottom"] = "blur"
+    format_preset: Literal["youtube_shorts", "tiktok", "instagram_reels", "instagram_portrait", "square", "landscape", "custom"] = "custom"
+    resolution: Literal[720, 1080, 2160] = 1080
+    frame_rate: Literal["source", 24, 30, 60] = "source"
     caption_style: Literal["neon", "impact", "clean", "hormozi", "mrbeast"] = "neon"
     watermark_text: str = Field(default="", max_length=60)
     opening_hook: str = Field(default="", max_length=100)
@@ -216,6 +249,16 @@ class RenderOptions(BaseModel):
     music_volume: int = Field(default=20, ge=0, le=100)
     music_fade_seconds: float = Field(default=1.5, ge=0, le=5)
 
+    @model_validator(mode="after")
+    def apply_format_preset(self) -> "RenderOptions":
+        ratio_by_preset = {
+            "youtube_shorts": "9:16", "tiktok": "9:16", "instagram_reels": "9:16",
+            "instagram_portrait": "4:5", "square": "1:1", "landscape": "16:9",
+        }
+        if self.format_preset in ratio_by_preset:
+            self.aspect_ratio = ratio_by_preset[self.format_preset]
+        return self
+
     @field_validator("watermark_text")
     @classmethod
     def clean_watermark_text(cls, value: str) -> str:
@@ -230,6 +273,30 @@ class RenderOptions(BaseModel):
     @classmethod
     def clean_outro_text(cls, value: str) -> str:
         return " ".join(value.split())
+
+
+class LiveStartRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_url: str = Field(min_length=8, max_length=2048)
+
+    @field_validator("source_url")
+    @classmethod
+    def validate_source(cls, value: str) -> str:
+        return validate_local_stream_url(value)
+
+
+class LiveClipRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    duration_seconds: Literal[15, 30, 45] = 30
+    transcription_language: Literal["auto", "en", "hi", "es", "fr", "de", "pt", "ja", "ko", "zh", "it", "ru", "ar"] = "auto"
+    render_options: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("render_options")
+    @classmethod
+    def normalize_render_options(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return RenderOptions.model_validate(value).model_dump()
 
 
 class ClipRatingRequest(BaseModel):
@@ -301,6 +368,7 @@ async def lifespan(_: FastAPI):
     finally:
         worker_task.cancel()
         await asyncio.gather(worker_task, return_exceptions=True)
+        live_capture.close()
 
 
 app = FastAPI(
@@ -322,6 +390,46 @@ app.add_middleware(
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "service": "clipforge-ai", "version": app.version}
+
+
+@app.get("/api/live/status")
+def live_status() -> dict[str, object]:
+    return live_capture.status()
+
+
+@app.post("/api/live/start")
+def start_live_capture(payload: LiveStartRequest) -> dict[str, object]:
+    try:
+        return live_capture.start(payload.source_url)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.post("/api/live/stop")
+def stop_live_capture() -> dict[str, object]:
+    return live_capture.stop()
+
+
+@app.post("/api/live/clip", status_code=202)
+def clip_live_capture(payload: LiveClipRequest) -> dict[str, Any]:
+    try:
+        path = validate_video_path(str(live_capture.clip_recent(payload.duration_seconds)))
+        options = RecordingImportOptions(
+            authorized=True,
+            auto_analyze=True,
+            clip_count=1,
+            clip_duration_seconds=payload.duration_seconds,
+            moment_mix="balanced",
+            transcription_language=payload.transcription_language,
+            render_options=payload.render_options,
+        )
+        return _register_recording(path, f"Live capture · {datetime.now().strftime('%Y-%m-%d %H-%M-%S')}", options)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
 
 @app.get("/api/overview")
@@ -359,6 +467,21 @@ def recording_analysis(recording_id: str) -> dict[str, Any]:
     if result is None:
         raise HTTPException(status_code=404, detail="Recording not found.")
     return result
+
+
+@app.get("/api/recordings/{recording_id}/source-preview")
+def recording_source_preview(recording_id: str) -> FileResponse:
+    source = get_recording_source(recording_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Recording not found.")
+    if not source["authorized"]:
+        raise HTTPException(status_code=403, detail="This recording is not available for preview.")
+    try:
+        path = validate_video_path(source["file_path"])
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail="The source video is unavailable.") from error
+    media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    return FileResponse(path, media_type=media_type)
 
 
 @app.get("/api/recordings/{recording_id}/subtitles")
@@ -689,6 +812,9 @@ def analyze_recording(
             clip_count=options.clip_count,
             clip_duration_seconds=options.clip_duration_seconds,
             moment_mix=options.moment_mix,
+            transcription_language=options.transcription_language,
+            render_options=options.render_options,
+            focus_prompt=options.focus_prompt,
         )
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
@@ -709,6 +835,9 @@ def _register_recording(path: Path, display_name: str, options: RecordingImportO
             "clip_count": options.clip_count,
             "clip_duration_seconds": options.clip_duration_seconds,
             "moment_mix": options.moment_mix,
+            "transcription_language": options.transcription_language,
+            "render_options": options.render_options,
+            "focus_prompt": options.focus_prompt,
         }
     try:
         create_recording(recording_id, normalized_path, display_name, True, auto_analysis=auto_analysis)
@@ -741,16 +870,28 @@ async def upload_recording(
     clip_count: int = Query(default=1, ge=1, le=100),
     clip_duration_seconds: int = Query(default=30, ge=15, le=45),
     moment_mix: Literal["balanced", "action", "dialogue"] = Query(default="balanced"),
+    transcription_language: Literal["auto", "en", "hi", "es", "fr", "de", "pt", "ja", "ko", "zh", "it", "ru", "ar"] = Query(default="auto"),
+    render_options: str = Query(default="{}", max_length=3000),
+    focus_prompt: str = Query(default="", max_length=160),
 ) -> dict[str, Any]:
     if not authorized:
         raise HTTPException(status_code=400, detail="Confirm that you own or are authorized to use this recording before importing it.")
-    options = RecordingImportOptions(
-        authorized=authorized,
-        auto_analyze=auto_analyze,
-        clip_count=clip_count,
-        clip_duration_seconds=clip_duration_seconds,
-        moment_mix=moment_mix,
-    )
+    try:
+        render_options_value = json.loads(render_options)
+        if not isinstance(render_options_value, dict):
+            raise ValueError("Render options must be a JSON object.")
+        options = RecordingImportOptions(
+            authorized=authorized,
+            auto_analyze=auto_analyze,
+            clip_count=clip_count,
+            clip_duration_seconds=clip_duration_seconds,
+            moment_mix=moment_mix,
+            transcription_language=transcription_language,
+            render_options=render_options_value,
+            focus_prompt=focus_prompt,
+        )
+    except (ValueError, TypeError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     try:
         path, display_name = await save_uploaded_video(filename, request.headers.get("content-type"), request.stream())
         path = validate_video_path(str(path))

@@ -100,6 +100,9 @@ def _process_job(job: dict[str, Any]) -> None:
                     clip_count=auto_analysis.get("clip_count", 1),
                     clip_duration_seconds=auto_analysis.get("clip_duration_seconds", 30),
                     moment_mix=auto_analysis.get("moment_mix", "balanced"),
+                    transcription_language=auto_analysis.get("transcription_language", "auto"),
+                    render_options=auto_analysis.get("render_options", {}),
+                    focus_prompt=auto_analysis.get("focus_prompt", ""),
                 )
                 logger.info("Queued automatic clip analysis for recording %s as job %s", recording_id, queued["id"])
         elif job["job_type"] == "analyze_recording":
@@ -117,16 +120,18 @@ def _process_job(job: dict[str, Any]) -> None:
             def progress(value: int, _segment_count: int, stage: str) -> None:
                 update_job(job_id, stage=stage, progress=value)
 
+            payload = json.loads(job.get("payload_json") or "{}")
+            transcription_language = payload.get("transcription_language")
             result = transcribe_recording(
                 source=path,
                 recording_id=recording_id,
                 model_name=settings["transcription_model"],
+                language=transcription_language if transcription_language not in {None, "", "auto"} else None,
                 cpu_threads=cpu_threads,
                 progress=progress,
                 check_cancel=check_cancel,
             )
             check_cancel()
-            payload = json.loads(job.get("payload_json") or "{}")
             candidates = generate_highlights(
                 duration_seconds=recording["duration_seconds"],
                 energy_by_second=result["energy_by_second"],
@@ -135,12 +140,13 @@ def _process_job(job: dict[str, Any]) -> None:
                 max_candidates=max(1, min(int(payload.get("clip_count", 1)), 100)),
                 window_seconds=max(15, min(int(payload.get("clip_duration_seconds", 30)), 45)),
                 moment_mix=str(payload.get("moment_mix", "balanced")),
+                focus_prompt=str(payload.get("focus_prompt", "")),
             )
             clip_ids = save_analysis_result(recording_id, result, candidates)
             if payload.get("auto_process", True):
                 for clip_id in clip_ids:
                     check_cancel()
-                    create_render_job(clip_id)
+                    create_render_job(clip_id, render_options=payload.get("render_options") or None)
                     queue_metadata_generation(clip_id, "", "hype")
             update_job(job_id, status="complete", stage="complete", progress=100, error_message="")
         elif job["job_type"] == "render_clip":

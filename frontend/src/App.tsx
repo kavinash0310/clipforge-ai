@@ -35,7 +35,8 @@ import {
   Zap,
 } from "lucide-react";
 
-type Page = "overview" | "media" | "clips" | "youtube" | "settings";
+type Page = "overview" | "media" | "clips" | "youtube" | "live" | "settings";
+type TranscriptionLanguage = "auto" | "en" | "hi" | "es" | "fr" | "de" | "pt" | "ja" | "ko" | "zh" | "it" | "ru" | "ar";
 type Job = {
   id: string;
   job_type: string;
@@ -114,7 +115,10 @@ type QueueJob = Job & {
 type SubtitleSegment = { start: number; end: number; text: string };
 type RenderOptions = {
   aspect_ratio: "9:16" | "1:1" | "4:5" | "16:9";
-  layout: "blur" | "fit" | "fill";
+  format_preset: "youtube_shorts" | "tiktok" | "instagram_reels" | "instagram_portrait" | "square" | "landscape" | "custom";
+  resolution: 720 | 1080 | 2160;
+  frame_rate: "source" | 24 | 30 | 60;
+  layout: "blur" | "blur_top" | "blur_bottom" | "fit" | "fill" | "fill_top" | "fill_bottom";
   caption_style: "neon" | "impact" | "clean" | "hormozi" | "mrbeast";
   watermark_text: string;
   opening_hook: string;
@@ -130,7 +134,7 @@ type RenderOptions = {
   music_volume: number;
   music_fade_seconds: number;
 };
-const defaultRenderOptions: RenderOptions = { aspect_ratio: "9:16", layout: "blur", caption_style: "neon", watermark_text: "", opening_hook: "", outro_text: "", caption_font: "Arial", caption_size: 50, caption_text_color: "#FFFFFF", caption_outline_color: "#351633", caption_words_per_line: 5, caption_animation: "static", music_asset_id: null, music_name: "", music_volume: 20, music_fade_seconds: 1.5 };
+const defaultRenderOptions: RenderOptions = { aspect_ratio: "9:16", format_preset: "youtube_shorts", resolution: 1080, frame_rate: "source", layout: "blur", caption_style: "neon", watermark_text: "", opening_hook: "", outro_text: "", caption_font: "Arial", caption_size: 50, caption_text_color: "#FFFFFF", caption_outline_color: "#351633", caption_words_per_line: 5, caption_animation: "static", music_asset_id: null, music_name: "", music_volume: 20, music_fade_seconds: 1.5 };
 type MetadataTone = "hype" | "funny" | "clean" | "competitive";
 type ClipMetadataForm = {
   game_name: string;
@@ -196,6 +200,15 @@ type YouTubePublication = {
   upload_title: string | null;
   video_url: string | null;
 };
+type LiveCaptureStatus = {
+  running: boolean;
+  session_id: string | null;
+  source_url: string | null;
+  started_at: string | null;
+  segment_count: number;
+  available_seconds: number;
+  error: string | null;
+};
 type RecordingAnalysis = {
   recording_id: string;
   transcript: null | {
@@ -233,6 +246,7 @@ const navItems = [
   { label: "Create clips", icon: Clapperboard, page: "media" as const },
   { label: "My clips", icon: Film, page: "clips" as const },
   { label: "YouTube", icon: Upload, page: "youtube" as const },
+  { label: "Live clipping", icon: Activity, page: "live" as const },
   { label: "Overview", icon: Layers3, page: "overview" as const },
   { label: "Settings", icon: Settings2, page: "settings" as const },
 ];
@@ -398,6 +412,7 @@ function App() {
           {navItems.map(({ label, icon: Icon, page: target }) => (
             <button key={target} className={`nav-item ${page === target ? "active" : ""}`} onClick={() => setPage(target)}>
               <Icon size={17} strokeWidth={1.9} /><span>{label}</span>
+              {target === "live" && <span className="nav-new-badge">NEW</span>}
               {target === "media" && activeJobs > 0 && <span className="nav-count">{activeJobs}</span>}
               {target === "clips" && (overview?.clips_total ?? 0) > 0 && <span className="nav-count">{overview?.clips_total}</span>}
             </button>
@@ -426,7 +441,7 @@ function App() {
 
       <main className="main-area">
         <header className="topbar">
-              <div className="breadcrumb"><span>CLIPFORGE</span><span className="crumb-divider">/</span><span>{page === "overview" ? "OVERVIEW" : page === "media" ? "CREATE CLIPS" : page === "clips" ? "MY CLIPS" : page === "youtube" ? "YOUTUBE" : "SETTINGS"}</span></div>
+              <div className="breadcrumb"><span>CLIPFORGE</span><span className="crumb-divider">/</span><span>{page === "overview" ? "OVERVIEW" : page === "media" ? "CREATE CLIPS" : page === "clips" ? "MY CLIPS" : page === "youtube" ? "YOUTUBE" : page === "live" ? "LIVE CLIPPING" : "SETTINGS"}</span></div>
           <div className="topbar-actions">
             <div className={`system-pill ${systemReady ? "ready" : "attention"}`}>
               <span className="pill-dot" />{systemReady ? "Studio ready" : "Setup needs attention"}
@@ -521,6 +536,8 @@ function App() {
             <MyClipsPage onNavigate={setPage} onEditClip={(clipId) => { setRequestedClipId(clipId); setPage("media"); }} />
           ) : page === "youtube" ? (
             <YouTubePage onRefresh={() => void loadDashboard(true)} />
+          ) : page === "live" ? (
+            <LivePage onRefresh={() => void loadDashboard(true)} />
           ) : (
             <SettingsPage
               settings={settings}
@@ -583,6 +600,8 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
   const [clipCount, setClipCount] = useState(1);
   const [clipDuration, setClipDuration] = useState(30);
   const [momentMix, setMomentMix] = useState<"balanced" | "action" | "dialogue">("balanced");
+  const [focusPrompt, setFocusPrompt] = useState("");
+  const [transcriptionLanguage, setTranscriptionLanguage] = useState<TranscriptionLanguage>("auto");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
@@ -602,6 +621,8 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
   const fileInputRef = useRef<HTMLInputElement>(null);
   const captionFileRef = useRef<HTMLInputElement>(null);
   const musicFileRef = useRef<HTMLInputElement>(null);
+  const creationMusicFileRef = useRef<HTMLInputElement>(null);
+  const sourcePreviewRef = useRef<HTMLVideoElement>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -671,7 +692,7 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
     setMessage(null);
     setPageError(null);
     try {
-      const clipOptions = { authorized, auto_analyze: true, clip_count: clipCount, clip_duration_seconds: clipDuration, moment_mix: momentMix };
+      const clipOptions = { authorized, auto_analyze: true, clip_count: clipCount, clip_duration_seconds: clipDuration, moment_mix: momentMix, transcription_language: transcriptionLanguage, render_options: renderOptions, focus_prompt: focusPrompt };
       let result: { recording_id: string; job_id: string; display_name: string };
       if (sourceMode === "upload") {
         if (!selectedFile) throw new Error("Choose a video file first.");
@@ -682,6 +703,9 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
           clip_count: String(clipCount),
           clip_duration_seconds: String(clipDuration),
           moment_mix: momentMix,
+          transcription_language: transcriptionLanguage,
+          render_options: JSON.stringify(renderOptions),
+          focus_prompt: focusPrompt,
         });
         result = await api<{ recording_id: string; job_id: string; display_name: string }>(`/api/recordings/upload?${query.toString()}`, {
           method: "POST",
@@ -735,7 +759,7 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
     try {
       const result = await api<{ id: string; existing: boolean }>(`/api/recordings/${encodeURIComponent(recording.id)}/analyze`, {
         method: "POST",
-        body: JSON.stringify({ clip_count: clipCount, clip_duration_seconds: clipDuration, moment_mix: momentMix }),
+        body: JSON.stringify({ clip_count: clipCount, clip_duration_seconds: clipDuration, moment_mix: momentMix, transcription_language: transcriptionLanguage, render_options: renderOptions, focus_prompt: focusPrompt }),
       });
       setMessage(result.existing ? "This recording is already in the analysis queue." : `ClipForge is looking for up to ${clipCount} ${momentMix} moments from ${recording.display_name}. It will caption, render, and draft metadata for each result.`);
       setSelectedAnalysisId(null);
@@ -762,6 +786,7 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
   };
 
   const selectedClip = clips.find((clip) => clip.id === selectedClipId) ?? null;
+  const selectedRecording = recordings.find((recording) => recording.id === selectedAnalysisId) ?? null;
   const metadataWorking = Boolean(metadata && ["queued", "running", "generating", "paused"].includes(metadata.status));
   const metadataFormChanged = Boolean(metadata && JSON.stringify({
     game_name: metadataForm.game_name,
@@ -788,9 +813,12 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
     setSelectedClipId(clip.id);
     setCaptionDraft(clip.subtitles.map((segment) => ({ ...segment })));
     setTrimDraft({ start_seconds: clip.start_seconds, end_seconds: clip.end_seconds });
-    setRenderOptions({ ...defaultRenderOptions, ...clip.render_metadata.settings });
+    setRenderOptions({ ...defaultRenderOptions, ...clip.render_metadata.settings, format_preset: clip.render_metadata.settings?.format_preset ?? "custom" });
     metadataDirty.current = false;
     setPageError(null);
+    window.setTimeout(() => {
+      if (sourcePreviewRef.current?.readyState && sourcePreviewRef.current.readyState >= 1) sourcePreviewRef.current.currentTime = clip.start_seconds;
+    }, 0);
   };
 
   useEffect(() => {
@@ -918,6 +946,39 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
     }
   };
 
+  const setTrimFromPlayhead = (edge: "in" | "out") => {
+    if (!selectedClip || !sourcePreviewRef.current) return;
+    const playhead = sourcePreviewRef.current.currentTime;
+    const sourceDuration = selectedRecording?.duration_seconds ?? Number.POSITIVE_INFINITY;
+    if (edge === "in") {
+      setTrimDraft((range) => ({ ...range, start_seconds: Math.max(0, Math.min(playhead, range.end_seconds - 15)) }));
+    } else {
+      setTrimDraft((range) => ({ ...range, end_seconds: Math.min(sourceDuration, Math.max(range.start_seconds + 15, Math.min(playhead, range.start_seconds + 45))) }));
+    }
+  };
+
+  useEffect(() => {
+    if (!selectedClip) return;
+    const handleEditorShortcut = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(target.tagName))) return;
+      const video = sourcePreviewRef.current;
+      if (event.code === "Space" && video) {
+        event.preventDefault();
+        if (video.paused) void video.play();
+        else video.pause();
+      } else if (event.key.toLowerCase() === "i") {
+        event.preventDefault();
+        setTrimFromPlayhead("in");
+      } else if (event.key.toLowerCase() === "o") {
+        event.preventDefault();
+        setTrimFromPlayhead("out");
+      }
+    };
+    document.addEventListener("keydown", handleEditorShortcut);
+    return () => document.removeEventListener("keydown", handleEditorShortcut);
+  }, [selectedClip?.id, selectedClip?.status, selectedRecording?.duration_seconds]);
+
   const importCaptionFile = async (file: File | undefined) => {
     if (!file || !selectedClip) return;
     setPageError(null);
@@ -930,18 +991,28 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
         const seconds = parts.length === 3 ? parts[0] * 3600 + parts[1] * 60 + parts[2] : parts[0] * 60 + parts[1];
         return seconds + fraction;
       };
-      const segments: SubtitleSegment[] = source.split(/\n\s*\n/).flatMap((block) => {
-        const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
-        const timingIndex = lines.findIndex((line) => line.includes("-->"));
-        if (timingIndex < 0) return [];
-        const [inTime, outTime] = lines[timingIndex].split("-->");
-        const start = parseClock(inTime);
-        const end = parseClock(outTime);
-        const text = lines.slice(timingIndex + 1).join(" ").replace(/<[^>]*>/g, "").trim();
-        return Number.isFinite(start) && Number.isFinite(end) && text ? [{ start, end, text }] : [];
-      });
+      const isAss = file.name.toLowerCase().endsWith(".ass");
+      const segments: SubtitleSegment[] = isAss
+        ? source.split("\n").flatMap((line) => {
+          if (!/^Dialogue:/i.test(line)) return [];
+          const fields = line.split(",", 10);
+          const start = parseClock(fields[1] ?? "");
+          const end = parseClock(fields[2] ?? "");
+          const text = (fields[9] ?? "").replace(/\{[^}]*\}/g, "").replace(/\\[Nn]/g, " ").replace(/<[^>]*>/g, "").trim();
+          return Number.isFinite(start) && Number.isFinite(end) && text ? [{ start, end, text }] : [];
+        })
+        : source.split(/\n\s*\n/).flatMap((block) => {
+          const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
+          const timingIndex = lines.findIndex((line) => line.includes("-->"));
+          if (timingIndex < 0) return [];
+          const [inTime, outTime] = lines[timingIndex].split("-->");
+          const start = parseClock(inTime);
+          const end = parseClock(outTime);
+          const text = lines.slice(timingIndex + 1).join(" ").replace(/<[^>]*>/g, "").trim();
+          return Number.isFinite(start) && Number.isFinite(end) && text ? [{ start, end, text }] : [];
+        });
       const clipDurationSeconds = selectedClip.end_seconds - selectedClip.start_seconds;
-      if (!segments.length) throw new Error("No readable SRT or WebVTT caption cues were found.");
+      if (!segments.length) throw new Error("No readable SRT, ASS, or WebVTT caption cues were found.");
       if (segments.length > 300 || segments.some((segment) => segment.start < 0 || segment.end <= segment.start || segment.end > clipDurationSeconds + 0.05)) {
         throw new Error("Caption times must fit inside this clip. Export captions trimmed to this clip's duration.");
       }
@@ -972,6 +1043,7 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
     } finally {
       setClipBusy(false);
       if (musicFileRef.current) musicFileRef.current.value = "";
+      if (creationMusicFileRef.current) creationMusicFileRef.current.value = "";
     }
   };
 
@@ -1079,20 +1151,59 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
           </div>}
           <div className="import-actions-row">
             <label className="authorization-check"><input type="checkbox" checked={authorized} onChange={(event) => setAuthorized(event.target.checked)} /><span className="checkmark"><Check size={12} /></span><span>I own this recording or have permission to use it.</span></label>
-            <button className="primary-button import-submit" type="submit" disabled={(sourceMode === "upload" ? !selectedFile : sourceMode === "link" ? !sourceUrl.trim() : !path.trim()) || !authorized || busy}>{busy ? <LoaderCircle className="spin" size={15} /> : <Sparkles size={15} />}{busy ? "Preparing clips…" : "Make clips"}<ArrowUpRight size={14} /></button>
+            <button className="primary-button import-submit" type="submit" disabled={(sourceMode === "upload" ? !selectedFile : sourceMode === "link" ? !sourceUrl.trim() : !path.trim()) || !authorized || busy || clipBusy}>{busy || clipBusy ? <LoaderCircle className="spin" size={15} /> : <Sparkles size={15} />}{busy || clipBusy ? "Preparing clips…" : "Make clips"}<ArrowUpRight size={14} /></button>
           </div>
         </form>
         <div className="import-footnote"><ShieldCheck size={14} /><span>Video files are saved and processed on this PC. For links, use a direct media-file URL; platform watch pages aren’t file URLs.</span></div>
       </section>
 
-      <section className="surface-card clip-plan-card">
-        <div className="clip-plan-copy"><div className="section-overline">02 &nbsp;·&nbsp; SET THE CUT</div><h3>Choose your batch</h3><p>Pick how many highlights to find and a target length. Captions, vertical framing, and upload details are prepared automatically.</p></div>
-        <div className="clip-plan-fields">
-          <label>Number of clips<input type="number" min={1} max={100} value={clipCount} onChange={(event) => setClipCount(Math.max(1, Math.min(100, Number(event.target.value) || 1)))} /></label>
-          <label>Clip duration<select value={clipDuration} onChange={(event) => setClipDuration(Number(event.target.value))}><option value={15}>15 seconds</option><option value={30}>30 seconds</option><option value={45}>45 seconds</option></select></label>
-          <label>Moment mix<select value={momentMix} onChange={(event) => setMomentMix(event.target.value as typeof momentMix)}><option value="balanced">Balanced</option><option value="action">Action</option><option value="dialogue">Dialogue</option></select></label>
-        </div>
-      </section>
+      <div className="workflow-step-grid">
+        <section className="surface-card clip-plan-card workflow-step-card">
+          <div className="clip-plan-copy"><div className="section-overline">02 &nbsp;·&nbsp; MAKE IT YOUR FORMAT</div><h3>Choose the output</h3><p>Pick a platform shape and quality for every clip in this batch.</p></div>
+          <div className="clip-plan-fields">
+            <label>Number of clips<input type="number" min={1} max={100} value={clipCount} onChange={(event) => setClipCount(Math.max(1, Math.min(100, Number(event.target.value) || 1)))} /></label>
+            <label>Clip duration<select value={clipDuration} onChange={(event) => setClipDuration(Number(event.target.value))}><option value={15}>15 seconds</option><option value={30}>30 seconds</option><option value={45}>45 seconds</option></select></label>
+            <label>Platform format<select value={renderOptions.format_preset} onChange={(event) => { const preset = event.target.value as RenderOptions["format_preset"]; const ratios: Record<RenderOptions["format_preset"], RenderOptions["aspect_ratio"]> = { youtube_shorts: "9:16", tiktok: "9:16", instagram_reels: "9:16", instagram_portrait: "4:5", square: "1:1", landscape: "16:9", custom: renderOptions.aspect_ratio }; setRenderOptions((options) => ({ ...options, format_preset: preset, aspect_ratio: ratios[preset] })); }}><option value="youtube_shorts">YouTube Shorts · 9:16</option><option value="tiktok">TikTok · 9:16</option><option value="instagram_reels">Instagram Reels · 9:16</option><option value="instagram_portrait">Instagram portrait · 4:5</option><option value="square">Square · 1:1</option><option value="landscape">Landscape · 16:9</option><option value="custom">Custom frame</option></select></label>
+            <label>Export resolution<select value={renderOptions.resolution} onChange={(event) => setRenderOptions((options) => ({ ...options, resolution: Number(event.target.value) as RenderOptions["resolution"] }))}><option value={720}>720p</option><option value={1080}>1080p</option><option value={2160}>4K</option></select></label>
+            <label>Frame rate<select value={renderOptions.frame_rate} onChange={(event) => setRenderOptions((options) => ({ ...options, frame_rate: event.target.value === "source" ? "source" : Number(event.target.value) as 24 | 30 | 60 }))}><option value="source">Keep source</option><option value={24}>24 fps</option><option value={30}>30 fps</option><option value={60}>60 fps</option></select></label>
+            <label className="focus-prompt-field">Focus topic or campaign<input maxLength={160} value={focusPrompt} onChange={(event) => setFocusPrompt(event.target.value)} placeholder="e.g. ranked comeback, boss fight, clutch" /><small>Transcript phrase matches receive a ranking boost.</small></label>
+          </div>
+        </section>
+
+        <section className="surface-card clip-plan-card workflow-step-card">
+          <div className="clip-plan-copy"><div className="section-overline">03 &nbsp;·&nbsp; FRAME YOUR MOMENT</div><h3>Set the visual treatment</h3><p>Choose which moments the AI should favor and how the source fills the frame.</p></div>
+          <div className="clip-plan-fields">
+            <label>Moment mix<select value={momentMix} onChange={(event) => setMomentMix(event.target.value as typeof momentMix)}><option value="balanced">Balanced</option><option value="action">Action</option><option value="dialogue">Dialogue</option></select></label>
+            <label>Frame layout<select value={renderOptions.layout} onChange={(event) => setRenderOptions((options) => ({ ...options, layout: event.target.value as RenderOptions["layout"] }))}><option value="blur">Blurred fill</option><option value="blur_top">Blur fill · focus top</option><option value="blur_bottom">Blur fill · focus bottom</option><option value="fit">Fit with bars</option><option value="fill">Crop to fill · center</option><option value="fill_top">Crop to fill · top</option><option value="fill_bottom">Crop to fill · bottom</option></select></label>
+          </div>
+        </section>
+
+        <section className="surface-card clip-plan-card workflow-step-card">
+          <div className="clip-plan-copy"><div className="section-overline">04 &nbsp;·&nbsp; GIVE IT A VOICE</div><h3>Choose captions and language</h3><p>Set the speech language and a caption look before the batch starts rendering.</p></div>
+          <div className="clip-plan-fields">
+            <label>Speech language<select value={transcriptionLanguage} onChange={(event) => setTranscriptionLanguage(event.target.value as TranscriptionLanguage)}><option value="auto">Auto detect</option><option value="en">English</option><option value="hi">Hindi</option><option value="es">Spanish</option><option value="fr">French</option><option value="de">German</option><option value="pt">Portuguese</option><option value="ja">Japanese</option><option value="ko">Korean</option><option value="zh">Chinese</option><option value="it">Italian</option><option value="ru">Russian</option><option value="ar">Arabic</option></select></label>
+            <label>Caption style<select value={renderOptions.caption_style} onChange={(event) => { const style = event.target.value as RenderOptions["caption_style"]; setRenderOptions((options) => ({ ...options, caption_style: style, caption_font: style === "impact" ? "Impact" : "Arial" })); }}><option value="neon">Neon pop</option><option value="impact">Impact</option><option value="clean">Clean</option><option value="hormozi">Bold emphasis</option><option value="mrbeast">Creator punch</option></select></label>
+            <label>Caption motion<select value={renderOptions.caption_animation} onChange={(event) => setRenderOptions((options) => ({ ...options, caption_animation: event.target.value as RenderOptions["caption_animation"] }))}><option value="static">Static lines</option><option value="word_highlight">Word highlight</option></select></label>
+          </div>
+        </section>
+
+        <section className="surface-card clip-plan-card workflow-step-card extras-step-card">
+          <div className="clip-plan-copy"><div className="section-overline">05 &nbsp;·&nbsp; STYLE & EXTRAS · NEW</div><h3>Add your finishing touches</h3><p>Optional hook, outro, creator mark, and music bed. These choices will be applied to each clip in the batch.</p></div>
+          <div className="clip-plan-fields extras-fields">
+            <label>Opening hook<input maxLength={100} value={renderOptions.opening_hook} onChange={(event) => setRenderOptions((options) => ({ ...options, opening_hook: event.target.value }))} placeholder="Optional opening line" /></label>
+            <label>Outro ribbon<input maxLength={100} value={renderOptions.outro_text} onChange={(event) => setRenderOptions((options) => ({ ...options, outro_text: event.target.value }))} placeholder="Optional closing line" /></label>
+            <label>Creator watermark<input maxLength={60} value={renderOptions.watermark_text} onChange={(event) => setRenderOptions((options) => ({ ...options, watermark_text: event.target.value }))} placeholder="Name or @handle" /></label>
+          </div>
+          <input ref={creationMusicFileRef} className="sr-only" type="file" accept="audio/*,.mp3,.m4a,.aac,.wav,.ogg,.flac,.opus" onChange={(event) => void importMusicFile(event.target.files?.[0])} />
+          <div className="music-bed-controls">
+            <div><strong>Music bed</strong><span>{renderOptions.music_name || "Optional local audio track"}</span></div>
+            <button className="secondary-button" disabled={clipBusy} onClick={() => creationMusicFileRef.current?.click()}><Upload size={12} />Choose audio</button>
+            {renderOptions.music_asset_id && <button className="icon-button" aria-label="Remove music bed" title="Remove music bed" onClick={() => setRenderOptions((options) => ({ ...options, music_asset_id: null, music_name: "" }))}>×</button>}
+            <label>Volume<input type="range" min={0} max={100} value={renderOptions.music_volume} disabled={!renderOptions.music_asset_id} onChange={(event) => setRenderOptions((options) => ({ ...options, music_volume: Number(event.target.value) }))} /><small>{renderOptions.music_volume}%</small></label>
+            <label>Fade<input type="number" min={0} max={5} step={0.5} value={renderOptions.music_fade_seconds} disabled={!renderOptions.music_asset_id} onChange={(event) => setRenderOptions((options) => ({ ...options, music_fade_seconds: Math.max(0, Math.min(5, Number(event.target.value) || 0)) }))} /><small>sec</small></label>
+          </div>
+        </section>
+      </div>
 
       <div className="media-columns">
         <section className="surface-card library-card">
@@ -1133,6 +1244,11 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
             <div className="analysis-header-actions"><a className="secondary-button subtitle-link" href={`/api/recordings/${encodeURIComponent(selectedAnalysisId)}/subtitles`} download><Upload size={13} /> Download SRT</a><button className="icon-button close-analysis" onClick={() => { setSelectedAnalysisId(null); setAnalysis(null); }} aria-label="Close analysis">×</button></div>
           </div>
           <div className="analysis-summary"><span><strong>{analysis.transcript?.segments.length ?? 0}</strong> transcript segments</span><span><strong>{analysis.candidates.length}</strong> ranked candidates</span><span><strong>{analysis.analysis?.scene_cuts.length ?? 0}</strong> scene changes</span><span>Model: <strong>{analysis.transcript?.model_name}</strong> · CPU int8</span></div>
+          {selectedRecording && <section className="source-review-panel">
+            <div className="source-review-heading"><div><div className="section-overline">FRAME YOUR MOMENT</div><h4>Review the actual scene</h4><p>Play the source and set clip in/out points from the video. The dotted box shows the centered 9:16 safe area.</p></div><span>{formatDuration(selectedRecording.duration_seconds)} source</span></div>
+            <div className="source-preview-stage"><video ref={sourcePreviewRef} key={selectedRecording.id} controls preload="metadata" src={`/api/recordings/${encodeURIComponent(selectedRecording.id)}/source-preview`} /><div className="source-safe-zone" aria-hidden="true"><span>9:16 safe area</span></div></div>
+            {selectedClip && selectedClip.recording_id === selectedAnalysisId && <div className="source-review-controls"><button className="row-action-button" disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onClick={() => setTrimFromPlayhead("in")}>I · Set in</button><button className="row-action-button" disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onClick={() => setTrimFromPlayhead("out")}>O · Set out</button><span>Space plays/pauses · {trimDraft.start_seconds.toFixed(1)}s → {trimDraft.end_seconds.toFixed(1)}s</span></div>}
+          </section>}
           <div className="candidate-section-heading"><div><div className="section-overline">AI SELECTED MOMENTS</div><h4>Candidate highlights</h4></div><span>Clips, captions, and metadata are prepared in the background. You can still edit each result.</span></div>
           {analysis.candidates.length ? <div className="candidate-list">{analysis.candidates.map((candidate, index) => {
             const excerpt = analysis.transcript?.segments.filter((segment) => segment.end > candidate.start_seconds && segment.start < candidate.end_seconds).slice(0, 5) ?? [];
@@ -1160,14 +1276,16 @@ function MediaPage({ onRefresh, focusClipId, onFocusHandled }: { onRefresh: () =
                   <div className="clip-trim-heading"><strong>Trim source range</strong><span>Set the in/out points from the original video. Keep the clip between 15 and 45 seconds.</span></div>
                   <div className="clip-trim-fields"><label>In · source seconds<input type="number" min="0" step="0.1" value={trimDraft.start_seconds} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setTrimDraft((range) => ({ ...range, start_seconds: Number(event.target.value) || 0 }))} /></label><label>Out · source seconds<input type="number" min="0" step="0.1" value={trimDraft.end_seconds} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setTrimDraft((range) => ({ ...range, end_seconds: Number(event.target.value) || 0 }))} /></label><button className="secondary-button" disabled={!trimDraftChanged || clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onClick={() => void saveTrim()}>{clipBusy ? <LoaderCircle size={13} className="spin" /> : <Check size={13} />}Save trim</button></div>
                 </div>
-                <div className="caption-editor-heading"><div><strong>Caption correction</strong><span>Times are relative to this clip.</span></div><div className="caption-heading-actions"><input ref={captionFileRef} className="sr-only" type="file" accept=".srt,.vtt,text/vtt,application/x-subrip" onChange={(event) => void importCaptionFile(event.target.files?.[0])} /><button className="row-action-button" disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onClick={() => captionFileRef.current?.click()}><Upload size={12} /> Import SRT/VTT</button><button className="row-action-button" disabled={captionDraft.length >= 300 || clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status) || (captionDraft.length > 0 && captionDraft[captionDraft.length - 1].end >= selectedClip.end_seconds - selectedClip.start_seconds)} onClick={() => { const clipDuration = selectedClip.end_seconds - selectedClip.start_seconds; const start = captionDraft.length ? captionDraft[captionDraft.length - 1].end : 0; setCaptionDraft((segments) => [...segments, { start, end: Math.min(clipDuration, start + 2), text: "" }]); }}>Add line</button></div></div>
+                <div className="caption-editor-heading"><div><strong>Caption correction</strong><span>Times are relative to this clip.</span></div><div className="caption-heading-actions"><input ref={captionFileRef} className="sr-only" type="file" accept=".srt,.ass,.vtt,text/vtt,application/x-subrip" onChange={(event) => void importCaptionFile(event.target.files?.[0])} /><button className="row-action-button" disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onClick={() => captionFileRef.current?.click()}><Upload size={12} /> Import captions</button><button className="row-action-button" disabled={captionDraft.length >= 300 || clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status) || (captionDraft.length > 0 && captionDraft[captionDraft.length - 1].end >= selectedClip.end_seconds - selectedClip.start_seconds)} onClick={() => { const clipDuration = selectedClip.end_seconds - selectedClip.start_seconds; const start = captionDraft.length ? captionDraft[captionDraft.length - 1].end : 0; setCaptionDraft((segments) => [...segments, { start, end: Math.min(clipDuration, start + 2), text: "" }]); }}>Add line</button></div></div>
                 {captionDraft.length ? <div className="caption-edit-list">{captionDraft.map((segment, index) => <div className="caption-edit-row" key={`${index}-${segment.start}`}>
                   <div className="caption-time-fields"><label>In<input aria-label={`Caption ${index + 1} start time`} type="number" min="0" max={selectedClip.end_seconds - selectedClip.start_seconds} step="0.1" value={segment.start} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => updateCaption(index, "start", event.target.value)} /></label><label>Out<input aria-label={`Caption ${index + 1} end time`} type="number" min="0.1" max={selectedClip.end_seconds - selectedClip.start_seconds} step="0.1" value={segment.end} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => updateCaption(index, "end", event.target.value)} /></label><button className="icon-button caption-remove" aria-label={`Remove caption ${index + 1}`} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onClick={() => setCaptionDraft((segments) => segments.filter((_item, current) => current !== index))}>×</button></div>
                   <label className="sr-only" htmlFor={`caption-text-${index}`}>Caption text {index + 1}</label><textarea id={`caption-text-${index}`} maxLength={500} rows={2} value={segment.text} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => updateCaption(index, "text", event.target.value)} />
                 </div>)}</div> : <div className="caption-empty">No speech was detected in this highlight. Add caption lines if needed.</div>}
                 <div className="render-controls">
-                  <label>Frame<select value={renderOptions.aspect_ratio} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, aspect_ratio: event.target.value as RenderOptions["aspect_ratio"] }))}><option value="9:16">9:16 · Shorts</option><option value="1:1">1:1 · Square</option><option value="4:5">4:5 · Portrait</option><option value="16:9">16:9 · Landscape</option></select></label>
-                  <label>Layout<select value={renderOptions.layout} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, layout: event.target.value as RenderOptions["layout"] }))}><option value="blur">Blurred fill</option><option value="fit">Fit with bars</option><option value="fill">Crop to fill</option></select></label>
+                  <label>Frame<select value={renderOptions.aspect_ratio} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, aspect_ratio: event.target.value as RenderOptions["aspect_ratio"], format_preset: "custom" }))}><option value="9:16">9:16 · Shorts / Reels</option><option value="1:1">1:1 · Square</option><option value="4:5">4:5 · Portrait</option><option value="16:9">16:9 · Landscape</option></select></label>
+                  <label>Resolution<select value={renderOptions.resolution} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, resolution: Number(event.target.value) as RenderOptions["resolution"] }))}><option value={720}>720p</option><option value={1080}>1080p</option><option value={2160}>4K</option></select></label>
+                  <label>Frame rate<select value={renderOptions.frame_rate} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, frame_rate: event.target.value === "source" ? "source" : Number(event.target.value) as 24 | 30 | 60 }))}><option value="source">Keep source</option><option value={24}>24 fps</option><option value={30}>30 fps</option><option value={60}>60 fps</option></select></label>
+                  <label>Layout<select value={renderOptions.layout} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, layout: event.target.value as RenderOptions["layout"] }))}><option value="blur">Blurred fill</option><option value="blur_top">Blur fill · focus top</option><option value="blur_bottom">Blur fill · focus bottom</option><option value="fit">Fit with bars</option><option value="fill">Crop to fill · center</option><option value="fill_top">Crop to fill · top</option><option value="fill_bottom">Crop to fill · bottom</option></select></label>
                   <label>Captions<select value={renderOptions.caption_style} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => { const style = event.target.value as RenderOptions["caption_style"]; setRenderOptions((options) => ({ ...options, caption_style: style, caption_font: style === "impact" ? "Impact" : "Arial" })); }}><option value="neon">GTA Neon</option><option value="impact">Impact</option><option value="clean">Clean</option><option value="hormozi">Hormozi</option><option value="mrbeast">MrBeast</option></select></label>
                   <label>Caption motion<select value={renderOptions.caption_animation} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, caption_animation: event.target.value as RenderOptions["caption_animation"] }))}><option value="static">Static lines</option><option value="word_highlight">Word highlight</option></select></label>
                   <label>Watermark<input maxLength={60} value={renderOptions.watermark_text} disabled={clipBusy || ["queued", "rendering", "paused"].includes(selectedClip.status)} onChange={(event) => setRenderOptions((options) => ({ ...options, watermark_text: event.target.value }))} placeholder="Optional creator name" /></label>
@@ -1418,6 +1536,34 @@ function YouTubePage({ onRefresh }: { onRefresh: () => void }) {
     }
   };
 
+  const uploadAllPrivately = async () => {
+    if (!publishableClips.length) return;
+    setWorking("upload-all");
+    setPageError(null);
+    setMessage(null);
+    let queued = 0;
+    let alreadyQueued = 0;
+    const failures: string[] = [];
+    try {
+      for (const clip of publishableClips) {
+        try {
+          const result = await api<{ id: string | null; status: string; existing: boolean }>(`/api/clips/${encodeURIComponent(clip.id)}/youtube-upload`, { method: "POST" });
+          if (result.existing) alreadyQueued += 1;
+          else queued += 1;
+          setMessage(`Queueing private uploads · ${queued + alreadyQueued} of ${publishableClips.length}`);
+        } catch {
+          failures.push(clip.upload_title || clip.title);
+        }
+      }
+      setMessage(`${queued} private ${queued === 1 ? "upload" : "uploads"} queued${alreadyQueued ? ` · ${alreadyQueued} already had a publication` : ""}${failures.length ? ` · ${failures.length} could not be queued` : ""}.`);
+      if (failures.length) setPageError(`Could not queue: ${failures.slice(0, 3).join(", ")}${failures.length > 3 ? `, and ${failures.length - 3} more` : ""}.`);
+      await refresh();
+      onRefresh();
+    } finally {
+      setWorking(null);
+    }
+  };
+
   const schedule = async (items: Clip[]) => {
     if (!items.length) return;
     const startAt = new Date(scheduleAt);
@@ -1548,6 +1694,7 @@ function YouTubePage({ onRefresh }: { onRefresh: () => void }) {
         <div className="youtube-schedule-fields">
           <label>Start date and time<input type="datetime-local" value={scheduleAt} min={minimumScheduleAt} onChange={(event) => setScheduleAt(event.target.value)} /></label>
           <label>Batch interval<select value={scheduleInterval} onChange={(event) => setScheduleInterval(Number(event.target.value))}><option value={15}>15 minutes</option><option value={30}>30 minutes</option><option value={60}>1 hour</option><option value={90}>1.5 hours</option><option value={120}>2 hours</option><option value={360}>6 hours</option><option value={1440}>1 day</option></select></label>
+          <button className="secondary-button upload-all-button" disabled={!isConnected || working !== null || publishableClips.length === 0} onClick={() => void uploadAllPrivately()}>{working === "upload-all" ? <LoaderCircle size={13} className="spin" /> : <Upload size={13} />}Upload all privately</button>
           <button className="primary-button" disabled={!isConnected || working !== null || publishableClips.length === 0} onClick={() => void schedule(publishableClips)}>{working === "schedule" ? <LoaderCircle size={13} className="spin" /> : <CalendarClock size={13} />}Schedule all ready</button>
         </div>
       </section>
@@ -1581,6 +1728,124 @@ function YouTubePage({ onRefresh }: { onRefresh: () => void }) {
 
 function Metric({ value, label }: { value: number; label: string }) {
   return <div className="youtube-metric"><strong>{value.toLocaleString()}</strong><span>{label}</span></div>;
+}
+
+function LivePage({ onRefresh }: { onRefresh: () => void }) {
+  const [status, setStatus] = useState<LiveCaptureStatus | null>(null);
+  const [sourceUrl, setSourceUrl] = useState("rtmp://127.0.0.1:1935/live/clipforge");
+  const [duration, setDuration] = useState<15 | 30 | 45>(30);
+  const [language, setLanguage] = useState<TranscriptionLanguage>("auto");
+  const [renderOptions, setRenderOptions] = useState<RenderOptions>(defaultRenderOptions);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const refreshStatus = useCallback(async () => {
+    try {
+      setStatus(await api<LiveCaptureStatus>("/api/live/status"));
+      setError(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Live capture status could not be loaded.");
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshStatus();
+    const timer = window.setInterval(() => void refreshStatus(), 2000);
+    return () => window.clearInterval(timer);
+  }, [refreshStatus]);
+
+  const start = async () => {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const next = await api<LiveCaptureStatus>("/api/live/start", { method: "POST", body: JSON.stringify({ source_url: sourceUrl }) });
+      setStatus(next);
+      setNotice("Live capture started. Recent footage will appear here as it arrives.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Live capture could not be started.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const stop = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      setStatus(await api<LiveCaptureStatus>("/api/live/stop", { method: "POST" }));
+      setNotice("Capture stopped. You can still make a clip from the buffered moments.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Live capture could not be stopped.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const createClip = async () => {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await api<{ display_name: string }>("/api/live/clip", {
+        method: "POST",
+        body: JSON.stringify({ duration_seconds: duration, transcription_language: language, render_options: renderOptions }),
+      });
+      setNotice(`${result.display_name} added to the AI analysis queue. Captions and format settings will be applied automatically.`);
+      onRefresh();
+      await refreshStatus();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "A clip could not be created from the capture.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const canClip = Boolean(status?.session_id && status.available_seconds >= duration);
+
+  return (
+    <>
+      <section className="page-heading live-heading">
+        <div><div className="eyebrow"><span className="eyebrow-line" /> ⚡ LIVE CLIPPING · NEW</div><h1>Catch it while it happens<span className="heading-period">.</span></h1><p className="heading-subtitle">Keep a rolling buffer of your local stream and send the latest moment into ClipForge’s caption and editing workflow.</p></div>
+        <span className={`live-session-pill ${status?.running ? "on-air" : "off-air"}`}><i />{status?.running ? "Capturing now" : "Capture idle"}</span>
+      </section>
+
+      {error && <div className="error-banner"><AlertTriangle size={17} /><span>{error}</span><button onClick={() => void refreshStatus()}>Retry</button></div>}
+      {notice && <div className="success-banner"><Check size={16} /><span>{notice}</span><button aria-label="Dismiss message" onClick={() => setNotice(null)}>×</button></div>}
+
+      <section className="live-console-card surface-card">
+        <div className="live-console-copy"><div className="live-console-icon"><Activity size={20} /></div><div><div className="section-overline">LOCAL STREAM INPUT</div><h3>Connect a live source</h3><p>Enter the loopback RTMP, SRT, or UDP address your local streaming setup publishes to. ClipForge only accepts localhost sources.</p></div></div>
+        <label className="live-source-label">Stream address<input type="url" value={sourceUrl} disabled={Boolean(status?.running) || busy} onChange={(event) => setSourceUrl(event.target.value)} placeholder="rtmp://127.0.0.1:1935/live/clipforge" /></label>
+        <div className="live-console-actions">
+          {status?.running ? <button className="live-stop-button" onClick={() => void stop()} disabled={busy}><SquareStop size={15} />{busy ? "Stopping…" : "Stop capture"}</button> : <button className="primary-button live-start-button" onClick={() => void start()} disabled={busy || !sourceUrl.trim()}>{busy ? <LoaderCircle className="spin" size={15} /> : <Play size={15} />}{busy ? "Connecting…" : "Start capture"}<ArrowUpRight size={14} /></button>}
+          <div className="live-meter"><span className={status?.running ? "meter-running" : ""} /><span className={status?.running ? "meter-running" : ""} /><span className={status?.running ? "meter-running" : ""} /><span className={status?.running ? "meter-running" : ""} /><span className={status?.running ? "meter-running" : ""} /><span className={status?.running ? "meter-running" : ""} /><span className={status?.running ? "meter-running" : ""} /><span className={status?.running ? "meter-running" : ""} /><span className={status?.running ? "meter-running" : ""} /></div>
+        </div>
+        <div className="live-stats-row"><div><strong>{formatDuration(status?.available_seconds)}</strong><span>buffered footage</span></div><div><strong>{status?.segment_count ?? 0}</strong><span>ready segments</span></div><div><strong>{status?.started_at ? formatDate(status.started_at) : "—"}</strong><span>session started</span></div></div>
+        {status?.error && <div className="live-runtime-error">{status.error}</div>}
+      </section>
+
+      <div className="live-workflow-grid">
+        <section className="surface-card live-workflow-card">
+          <div className="section-overline">01 · CHOOSE YOUR MOMENT</div><h3>Clip from the rolling buffer</h3><p>Select the latest window to send to the highlight detector.</p>
+          <div className="live-form-grid">
+            <label>Recent footage<select value={duration} onChange={(event) => setDuration(Number(event.target.value) as 15 | 30 | 45)}><option value={15}>Last 15 seconds</option><option value={30}>Last 30 seconds</option><option value={45}>Last 45 seconds</option></select></label>
+            <label>Speech language<select value={language} onChange={(event) => setLanguage(event.target.value as TranscriptionLanguage)}><option value="auto">Auto detect</option><option value="en">English</option><option value="hi">Hindi</option><option value="es">Spanish</option><option value="fr">French</option><option value="de">German</option><option value="pt">Portuguese</option><option value="ja">Japanese</option><option value="ko">Korean</option><option value="zh">Chinese</option><option value="it">Italian</option><option value="ru">Russian</option><option value="ar">Arabic</option></select></label>
+            <label>Platform format<select value={renderOptions.format_preset} onChange={(event) => { const preset = event.target.value as RenderOptions["format_preset"]; const ratios: Record<RenderOptions["format_preset"], RenderOptions["aspect_ratio"]> = { youtube_shorts: "9:16", tiktok: "9:16", instagram_reels: "9:16", instagram_portrait: "4:5", square: "1:1", landscape: "16:9", custom: renderOptions.aspect_ratio }; setRenderOptions((options) => ({ ...options, format_preset: preset, aspect_ratio: ratios[preset] })); }}><option value="youtube_shorts">YouTube Shorts · 9:16</option><option value="tiktok">TikTok · 9:16</option><option value="instagram_reels">Instagram Reels · 9:16</option><option value="instagram_portrait">Instagram portrait · 4:5</option><option value="square">Square · 1:1</option><option value="landscape">Landscape · 16:9</option><option value="custom">Custom frame</option></select></label>
+            <label>Caption style<select value={renderOptions.caption_style} onChange={(event) => setRenderOptions((options) => ({ ...options, caption_style: event.target.value as RenderOptions["caption_style"] }))}><option value="neon">Neon pop</option><option value="impact">Impact</option><option value="clean">Clean</option><option value="hormozi">Bold emphasis</option><option value="mrbeast">Creator punch</option></select></label>
+          </div>
+          <button className="primary-button live-clip-button" disabled={!canClip || busy} onClick={() => void createClip()}>{busy ? <LoaderCircle className="spin" size={14} /> : <Clapperboard size={14} />}{busy ? "Preparing clip…" : `Clip last ${duration} seconds`}</button>
+          {!canClip && <span className="live-buffer-hint">Capture at least {duration} seconds to enable clipping.</span>}
+        </section>
+
+        <section className="surface-card live-setup-card">
+          <div className="section-overline">SETUP NOTES</div><h3>How local capture works</h3>
+          <ol><li>Start an RTMP/SRT/UDP ingest service on this PC.</li><li>Set your encoder or OBS to publish to the address above.</li><li>Start capture, wait for the buffer, then clip the last 15–45 seconds.</li></ol>
+          <div className="live-setup-note"><ShieldCheck size={15} /><span>Capture stays on this PC. Public platform watch links are not accepted as live sources.</span></div>
+        </section>
+      </div>
+    </>
+  );
 }
 
 function SettingsPage({ settings, system, saved, saveSettings, loading }: {
