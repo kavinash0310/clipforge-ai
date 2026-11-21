@@ -177,6 +177,7 @@
 - [x] AI Parts suggestions from transcript timestamps through local Ollama, validated against source duration with ranked local candidates as fallback.
 - [x] Exact transcript-range clip creation with selected-part batch actions.
 - [x] Additional caption animation, social templates, backgrounds, image logo overlays, credit text, and music riser settings in both creation and editor workflows.
+- [x] Default per-clip sampled color/exposure balancing, adjustable strength, and mild denoise/detail recovery with targeted facecam-crop cleanup for camera layouts.
 - [ ] Dedicated phone remote pairing, public live-chat clipping, creator-channel monitoring, and public platform watch-page extraction are not included in this local workflow.
 - These additions are documented but have not been run through the automated test suite or production UI build in this change.
 

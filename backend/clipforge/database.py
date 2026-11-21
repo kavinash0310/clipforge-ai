@@ -889,6 +889,7 @@ def create_render_job(
         "logo_asset_id": None, "logo_name": "", "logo_position": "top_right", "logo_size_percent": 16, "logo_opacity": 85, "credit_text": "",
         "opening_hook": "", "opening_hook_seconds": 8, "outro_text": "", "outro_seconds": 3, "caption_font": "Arial", "caption_size": 50,
         "caption_text_color": "#FFFFFF", "caption_outline_color": "#351633", "caption_words_per_line": 5, "caption_animation": "static",
+        "auto_enhance": True, "enhancement_strength": 65, "portrait_cleanup": True, "portrait_cleanup_strength": 45,
         "music_asset_id": None, "music_name": "", "music_volume": 20, "music_peak_volume": 85, "music_riser_seconds": 4, "music_fade_seconds": 1.5,
     }
     with database_session(database_path) as connection:
@@ -927,6 +928,7 @@ def create_render_job(
             "logo_asset_id": None, "logo_name": "", "logo_position": "top_right", "logo_size_percent": 16, "logo_opacity": 85, "credit_text": "",
             "opening_hook": "", "opening_hook_seconds": 8, "outro_text": "", "outro_seconds": 3, "caption_font": "Arial", "caption_size": 50,
             "caption_text_color": "#FFFFFF", "caption_outline_color": "#351633", "caption_words_per_line": 5, "caption_animation": "static",
+            "auto_enhance": True, "enhancement_strength": 65, "portrait_cleanup": True, "portrait_cleanup_strength": 45,
             "music_asset_id": None, "music_name": "", "music_volume": 20, "music_peak_volume": 85, "music_riser_seconds": 4, "music_fade_seconds": 1.5,
         }
         if clip["status"] == "rendered" and clip["file_path"] and Path(clip["file_path"]).is_file() and current_options == options:

@@ -1201,6 +1201,12 @@ h1 { color: #fff6ff; }
 .ai-part-copy strong { overflow: hidden; color: #e9e2ec; font-size: 9px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .ai-part-copy small { overflow: hidden; color: #8d919e; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .ai-part-duration { color: #9096a2; text-align: right; font-size: 8px; }
+.enhancement-option { display: grid; align-content: start; gap: 5px; min-width: 0; padding: 8px; background: #14131a; border: 1px solid #34303e; border-radius: 7px; }
+.enhancement-option > label { display: flex !important; align-items: center; gap: 7px !important; color: #e2d7e7 !important; cursor: pointer; font-size: 9px !important; }
+.enhancement-option > label input[type="checkbox"] { width: 14px !important; min-height: 14px !important; margin: 0; accent-color: #ef7ccc; }
+.enhancement-option > small { color: #93899b; font-size: 8px; line-height: 1.35; }
+.enhancement-option > input[type="range"] { min-height: 16px !important; padding: 0 !important; accent-color: #e878ca; }
+.extras-fields .enhancement-option { grid-column: span 2; }
 @media (max-width: 620px) {
   .ai-parts-heading { flex-direction: column; }
   .ai-parts-controls { grid-template-columns: 1fr; }
@@ -1210,4 +1216,5 @@ h1 { color: #fff6ff; }
   .ai-parts-selection-bar .primary-button { flex: 1; justify-content: center; }
   .ai-part-row { grid-template-columns: 16px 70px minmax(0, 1fr); }
   .ai-part-duration { display: none; }
+  .extras-fields .enhancement-option { grid-column: auto; }
 }

@@ -301,6 +301,10 @@ class RenderOptions(BaseModel):
     caption_outline_color: str = Field(default="#351633", pattern=r"^#[0-9A-Fa-f]{6}$")
     caption_words_per_line: int = Field(default=5, ge=2, le=12)
     caption_animation: Literal["static", "word_highlight", "pop_in", "pop_in_line", "one_by_one", "build_up"] = "static"
+    auto_enhance: bool = True
+    enhancement_strength: int = Field(default=65, ge=0, le=100)
+    portrait_cleanup: bool = True
+    portrait_cleanup_strength: int = Field(default=45, ge=0, le=100)
     music_asset_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
     music_name: str = Field(default="", max_length=180)
     music_volume: int = Field(default=20, ge=0, le=100)

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .media import probe_video
+from .video_enhancement import NEUTRAL_GRADE, analyze_clip_color, portrait_cleanup_filters
 
 
 def _clock(seconds: float) -> str:
@@ -266,6 +267,10 @@ def render_vertical_clip(
     music_peak_volume = max(0, min(int(options.get("music_peak_volume", 85)), 100)) / 100
     music_riser_seconds = max(1, min(int(options.get("music_riser_seconds", 4)), 15))
     music_fade_seconds = max(0.0, min(float(options.get("music_fade_seconds", 1.5)), 5.0))
+    auto_enhance = bool(options.get("auto_enhance", True))
+    enhancement_strength = max(0, min(int(options.get("enhancement_strength", 65)), 100))
+    portrait_cleanup = bool(options.get("portrait_cleanup", True))
+    portrait_cleanup_strength = max(0, min(int(options.get("portrait_cleanup_strength", 45)), 100))
     dimensions = {"9:16": (1080, 1920), "1:1": (1080, 1080), "4:5": (1080, 1350), "16:9": (1920, 1080)}
     supported_layouts = {
         "blur", "blur_top", "blur_bottom", "fit", "fill", "fill_top", "fill_bottom",
@@ -295,6 +300,22 @@ def render_vertical_clip(
     if not ffmpeg:
         raise RuntimeError("FFmpeg was not found on PATH. Install FFmpeg and restart ClipForge.")
     thread_count = max(1, min(int(cpu_threads or 4), os.cpu_count() or 1))
+    if auto_enhance and enhancement_strength > 0:
+        progress(14, "balancing_clip_color")
+        enhancement = analyze_clip_color(
+            source=source,
+            start_seconds=start_seconds,
+            duration_seconds=duration,
+            strength_percent=enhancement_strength,
+            cpu_threads=thread_count,
+            check_cancel=check_cancel,
+        )
+    else:
+        enhancement = dict(NEUTRAL_GRADE)
+        enhancement["note"] = "Automatic color balancing is disabled or set to zero strength."
+    facecam_layout = layout in {"facecam_overlay", "facecam_circle", "camera_top", "camera_bottom", "side_by_side"} and bool(facecam_box)
+    cleanup_filters = portrait_cleanup_filters(portrait_cleanup_strength) if portrait_cleanup else ""
+    facecam_cleanup_enabled = bool(cleanup_filters and facecam_layout)
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary_video = destination.with_name(f"{destination.stem}.rendering.mp4")
@@ -356,11 +377,14 @@ def render_vertical_clip(
             "bottom_center": f"(W-w)/2:H-h-{margin_y}",
         }.get(facecam_position, f"W-w-{margin_x}:{margin_y}")
         camera_filter = f"scale={camera_width}:{camera_height}:force_original_aspect_ratio=decrease:force_divisible_by=2,format=rgba"
+        facecam_filter = f"{_region_crop(facecam_box)},"
+        if facecam_cleanup_enabled:
+            facecam_filter += f"scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p,{cleanup_filters},"
         if layout == "facecam_circle":
             camera_filter += ",geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(lte((X-W/2)*(X-W/2)+(Y-H/2)*(Y-H/2),(min(W,H)/2)*(min(W,H)/2)),alpha(X,Y),0)'"
         framing = (
             f"[0:v]split=2[bg][cam];[bg]{game_crop}scale={width}:{height}:force_original_aspect_ratio=increase,"
-            f"crop={width}:{height}[bgv];[cam]{_region_crop(facecam_box)},{camera_filter}[camv];"
+            f"crop={width}:{height}[bgv];[cam]{facecam_filter}{camera_filter}[camv];"
             f"[bgv][camv]overlay={overlay_position}[framed];"
         )
     elif layout in {"camera_top", "camera_bottom"}:
@@ -369,9 +393,12 @@ def render_vertical_clip(
         camera_height = (round(height * 0.34) // 2) * 2
         game_height = height - camera_height
         game_crop = f"{_region_crop(gameplay_box)}," if gameplay_box else ""
+        facecam_filter = f"{_region_crop(facecam_box)},"
+        if facecam_cleanup_enabled:
+            facecam_filter += f"scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p,{cleanup_filters},"
         framing = (
             f"[0:v]split=2[game][cam];[game]{game_crop}scale={width}:{game_height}:force_original_aspect_ratio=increase,"
-            f"crop={width}:{game_height}[gamev];[cam]{_region_crop(facecam_box)},"
+            f"crop={width}:{game_height}[gamev];[cam]{facecam_filter}"
             f"scale={width}:{camera_height}:force_original_aspect_ratio=increase,crop={width}:{camera_height}[camv];"
         f"{('[camv][gamev]' if layout == 'camera_top' else '[gamev][camv]')}vstack=inputs=2[framed];"
         )
@@ -381,9 +408,12 @@ def render_vertical_clip(
         gameplay_width = width // 2
         camera_width = width - gameplay_width
         game_crop = f"{_region_crop(gameplay_box)}," if gameplay_box else ""
+        facecam_filter = f"{_region_crop(facecam_box)},"
+        if facecam_cleanup_enabled:
+            facecam_filter += f"scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p,{cleanup_filters},"
         framing = (
             f"[0:v]split=2[game][cam];[game]{game_crop}scale={gameplay_width}:{height}:force_original_aspect_ratio=increase,"
-            f"crop={gameplay_width}:{height}[gamev];[cam]{_region_crop(facecam_box)},"
+            f"crop={gameplay_width}:{height}[gamev];[cam]{facecam_filter}"
             f"scale={camera_width}:{height}:force_original_aspect_ratio=increase,crop={camera_width}:{height}[camv];"
             "[gamev][camv]hstack=inputs=2[framed];"
         )
@@ -435,6 +465,19 @@ def render_vertical_clip(
             filter_graph += f"[{background_input}:v]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},eq=brightness=-{background_dim_percent / 100:.2f}[bgv];"
         filter_graph += "[bgv][card]overlay=(W-w)/2:(H-h)/2:shortest=1[styled];"
         current_video_label = "styled"
+
+    if auto_enhance:
+        filter_graph += (
+            f"[{current_video_label}]eq=brightness={enhancement['brightness']:.4f}:"
+            f"contrast={enhancement['contrast']:.4f}:saturation={enhancement['saturation']:.4f},"
+            f"colorchannelmixer=rr={enhancement['red_gain']:.4f}:gg={enhancement['green_gain']:.4f}:"
+            f"bb={enhancement['blue_gain']:.4f}[balanced];"
+        )
+        current_video_label = "balanced"
+
+    if cleanup_filters and not facecam_cleanup_enabled:
+        filter_graph += f"[{current_video_label}]{cleanup_filters}[cleaned];"
+        current_video_label = "cleaned"
 
     if logo_input is not None:
         logo_width = max(48, round(width * logo_size_percent / 100))
@@ -532,6 +575,14 @@ def render_vertical_clip(
             "width": video["width"],
             "height": video["height"],
             "codec": video.get("codec"),
+            "enhancement": {
+                "auto_enhance": auto_enhance,
+                "strength_percent": enhancement_strength,
+                "portrait_cleanup": portrait_cleanup,
+                "portrait_cleanup_strength": portrait_cleanup_strength,
+                "grade": enhancement,
+                "facecam_cleanup_applied": facecam_cleanup_enabled,
+            },
             "settings": {
                 "aspect_ratio": aspect_ratio, "format_preset": options.get("format_preset", "youtube_shorts"),
                 "resolution": resolution, "frame_rate": frame_rate, "layout": layout, "caption_style": caption_style,
@@ -549,6 +600,8 @@ def render_vertical_clip(
                 "caption_size": caption_size, "caption_text_color": caption_text_color,
                 "caption_outline_color": caption_outline_color, "caption_words_per_line": caption_words_per_line,
                 "caption_animation": caption_animation,
+                "auto_enhance": auto_enhance, "enhancement_strength": enhancement_strength,
+                "portrait_cleanup": portrait_cleanup, "portrait_cleanup_strength": portrait_cleanup_strength,
                 "music_asset_id": options.get("music_asset_id"), "music_name": options.get("music_name", ""),
                 "music_volume": music_volume * 100, "music_peak_volume": music_peak_volume * 100,
                 "music_riser_seconds": music_riser_seconds, "music_fade_seconds": music_fade_seconds,

@@ -9,6 +9,8 @@
 - Added an AI Parts workflow that asks local Ollama for transcript-grounded 15–45 second ranges, validates each result against the source, falls back to ranked local highlights, and creates selected ranges as editable clips.
 - Added social-card templates, color/gradient/image backgrounds, logo overlays, creator credits, adjustable hook/outro timing, caption motion styles, and a music volume riser.
 - Added the editor's expanded styling panel for the same templates, background, logo, and credit controls available during clip creation.
+- Added per-clip sampled auto color balancing for exposure, contrast, saturation, and subtle channel white balance.
+- Added mild denoise/detail recovery, with facecam-crop targeting when a drawn facecam is used in a camera layout; both enhancement stages can be disabled or tuned.
 - Added exact transcript-range clip creation and image-asset upload validation for PNG, JPEG, and WebP files.
 - Updated the API guide, README, and user guide for the local editing and AI-parts features.
 - These newest additions have not been run through the project's automated tests or frontend build.
