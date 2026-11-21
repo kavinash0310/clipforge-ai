@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — Phase 6 YouTube integration
+## Unreleased — Phase 7 scheduling and resources
 
 - Added a local FastAPI service and SQLite database initialization.
 - Added a React/TypeScript dashboard with database-backed workspace totals and honest empty states.
@@ -15,6 +15,10 @@
 - Added Google Desktop OAuth with PKCE, loopback state validation, Windows DPAPI token storage, and disconnect/revoke.
 - Added resumable private YouTube uploads with per-clip duplicate prevention, persisted progress, restart recovery, and retries.
 - Added per-video YouTube analytics refresh and channel publication UI.
+- Added an optional weekly local-time schedule for queued job starts, including overnight windows and weekday selection.
+- Enforced configured worker slots while serializing CPU-intensive analysis, rendering, and local metadata generation.
+- Applied the CPU thread budget to faster-whisper and FFmpeg processing.
+- Documented schedule boundaries and the thread budget's limits in the API and user guide.
 - Removed the inactive review-queue dashboard placeholder and migrate away the empty legacy table.
 - Pinned PyAV below 19 to keep released faster-whisper compatible.
 - Added project, installation, API, database, security, rights, user, learning, and status documentation.

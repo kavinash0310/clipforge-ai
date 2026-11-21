@@ -4,7 +4,7 @@ SQLite is created at `%LOCALAPPDATA%\ClipForgeAI\clipforge.db` on Windows. `CLIP
 
 ## Current tables
 
-- `app_settings`: one JSON value per setting key and its update timestamp.
+- `app_settings`: one JSON value per setting key and its update timestamp, including concurrency, CPU thread target, pause/emergency controls, and optional weekly schedule.
 - `recordings`: source path, display name, media status, duration, and an authorization confirmation flag. The original file itself is never stored in SQLite.
 - `recording_metadata`: ffprobe-derived media streams and probe timestamp.
 - `recording_transcripts`: transcript language/model, output paths, timestamped segments, and generation time.

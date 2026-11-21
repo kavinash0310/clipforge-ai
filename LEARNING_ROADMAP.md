@@ -77,3 +77,15 @@ Generated copy should be fact-checked. It does not assess copyright status or as
 
 Google Desktop OAuth is a public-client flow and requires Google account consent. A Google OAuth project in external Testing status can issue refresh tokens that expire after seven days. See [Google's Desktop OAuth documentation](https://developers.google.com/identity/protocols/oauth2/native-app) and [OAuth refresh-token behavior](https://developers.google.com/identity/protocols/oauth2).
 
+## Phase 7 engineering notes
+
+### Weekly processing schedule and resource budget
+
+- **What:** Adds an optional weekly local-time window for queued jobs and makes concurrency/CPU controls affect worker behavior.
+- **Why:** Long analysis and FFmpeg renders should run when the creator chooses, without allowing several memory-heavy tasks to compete on a local 16 GB system.
+- **How:** A deterministic schedule evaluator handles weekdays, boundary times, and windows crossing midnight. The worker gates job starts while preserving queued records. One CPU-heavy job may run at a time, with configured spare slots available for I/O work. The CPU target maps to a conservative thread count for Whisper and FFmpeg rather than claiming a hard OS utilization cap.
+- **Technology choice:** SQLite settings, Python `datetime`, asyncio task slots, and FFmpeg/CTranslate2 thread parameters.
+- **Alternatives:** Launching ClipForge through Windows Task Scheduler, Windows job objects for hard resource quotas, or allowing multiple high-memory jobs after profiling.
+- **How to verify:** Unit-test local weekday/overnight windows, selected days, equal-time full-day windows, safe queue claiming, and thread budget limits; build the Settings page.
+- **Interview explanation:** “Scheduling is a persisted queue gate, so closed windows never discard work. CPU use is approximated through bounded parallelism and per-job thread counts, with the limit clearly distinguished from an OS-enforced quota.”
+

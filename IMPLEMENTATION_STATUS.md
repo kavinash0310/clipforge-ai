@@ -17,7 +17,7 @@
 
 ## Upcoming milestones
 
-- Scheduling, resource controls, recovery, and end-to-end documentation
+- Phase 8 integration optimization and documentation completion
 
 ## Scope decisions
 
@@ -119,8 +119,26 @@
 - Database checks verified private status, retryable publication history, analytics persistence, duplicate blocking, and the source-authorization guard.
 - Live Google upload was not run because a user-owned Desktop OAuth client file and channel consent are required.
 
+## Phase 7 — Scheduling and resource controls
+
+**Status:** Complete.
+
+- [x] Optional weekly processing window with local timezone, weekday selection, and overnight support
+- [x] Queued work waits outside its schedule window; already-running work is allowed to finish
+- [x] Worker enforces the configured total job slots and serializes CPU-intensive analysis, rendering, and local metadata jobs
+- [x] Remaining slots can process I/O work while a CPU-intensive job is active
+- [x] CPU percentage setting maps to bounded per-job thread counts for faster-whisper and FFmpeg
+- [x] Settings UI, Pydantic validation, schedule persistence defaults, API docs, user guide, system design, and learning notes updated
+
+## Phase 7 verification
+
+- `python -m unittest discover -s backend/tests -v`: 27 tests passed, including schedule boundaries, overnight/day selection, thread-budget mapping, and queue lane selection.
+- `npm --prefix frontend run build`: TypeScript check and Vite production build passed.
+- `python -m compileall -q backend/clipforge backend/tests`: passed.
+- Isolated FastAPI integration check passed: settings read/write, schedule validation, and the production frontend route.
+- CPU percentage is a per-job thread target, not a hard Windows CPU utilization cap.
+
 ## Next
 
-- Phase 7: scheduling and resource controls.
 - Phase 8: integration optimization and documentation completion.
 

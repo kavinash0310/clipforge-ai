@@ -87,7 +87,7 @@ Requeues a failed job while retries remain. Analysis starts over at audio extrac
 
 ## `GET /api/settings`
 
-Returns the persisted local settings. Defaults are semi-automatic mode, one concurrent job, a 75% CPU target, processing and emergency stop off, local Ollama URL, and public uploads disabled.
+Returns persisted local settings. The schedule is disabled by default, so queued jobs may start at any time. The 75% CPU setting becomes a conservative per-job thread budget; it is not a hard operating-system CPU cap.
 
 ## `PATCH /api/settings`
 
@@ -100,6 +100,10 @@ Accepts any subset of:
   "emergency_stop": false,
   "max_concurrent_jobs": 1,
   "cpu_limit_percent": 75,
+  "processing_schedule_enabled": false,
+  "processing_schedule_start": "22:00",
+  "processing_schedule_end": "06:00",
+  "processing_schedule_days": [0, 1, 2, 3, 4, 5, 6],
   "ollama_url": "http://127.0.0.1:11434",
   "ollama_model": "qwen3.5:4b",
   "transcription_model": "base",
@@ -107,7 +111,11 @@ Accepts any subset of:
 }
 ```
 
-Concurrency is limited to 1–4 and the CPU target to 25–95%. Ollama must use a localhost HTTP URL. Unknown keys and invalid values are rejected. The response contains the full updated settings object.
+Concurrency is limited to 1–4 and the CPU target to 25–95%. At most one CPU-intensive analysis, render, or local metadata job runs at once; I/O jobs may use remaining worker slots. CPU percentage maps to a per-job thread count for transcription and FFmpeg, and does not guarantee an exact OS-level utilization percentage.
+
+The schedule accepts 24-hour `HH:MM` start/end values and Monday-based weekday indexes (`0` Monday through `6` Sunday). It uses the computer's local timezone. Windows crossing midnight belong to the day on which they start; equal start/end times mean the full selected day. At least one unique day is required. Closing the window delays queued work but lets an already-running job finish; pause and emergency stop retain their existing immediate behavior.
+
+Ollama must use a localhost HTTP URL. Unknown keys and invalid values are rejected. The response contains the full updated settings object.
 
 Transcription models are `tiny`, `base`, or `small`. They run with CPU `int8`; the GPU remains available to the desktop and local LLM.
 

@@ -56,6 +56,10 @@ class SettingsPatch(BaseModel):
     emergency_stop: bool | None = None
     max_concurrent_jobs: int | None = Field(default=None, ge=1, le=4)
     cpu_limit_percent: int | None = Field(default=None, ge=25, le=95)
+    processing_schedule_enabled: bool | None = None
+    processing_schedule_start: str | None = Field(default=None, pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    processing_schedule_end: str | None = Field(default=None, pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    processing_schedule_days: list[int] | None = Field(default=None, min_length=1, max_length=7)
     ollama_url: str | None = None
     ollama_model: str | None = None
     transcription_model: Literal["tiny", "base", "small"] | None = None
@@ -81,6 +85,15 @@ class SettingsPatch(BaseModel):
         if not cleaned or len(cleaned) > 120:
             raise ValueError("Enter a model name up to 120 characters.")
         return cleaned
+
+    @field_validator("processing_schedule_days")
+    @classmethod
+    def validate_processing_schedule_days(cls, value: list[int] | None) -> list[int] | None:
+        if value is None:
+            return value
+        if len(set(value)) != len(value) or any(day < 0 or day > 6 for day in value):
+            raise ValueError("Schedule days must be unique values from 0 (Monday) through 6 (Sunday).")
+        return sorted(value)
 
 
 class RecordingImport(BaseModel):

@@ -12,6 +12,7 @@ from clipforge.database import (
     create_youtube_upload_job,
     create_recording,
     complete_clip_metadata,
+    claim_next_job,
     get_clip_render_input,
     database_session,
     get_recording_analysis,
@@ -268,6 +269,26 @@ class DatabaseTests(unittest.TestCase):
             )
         with self.assertRaises(PermissionError):
             create_youtube_upload_job("clip-upload-unauthorized", self.database_path)
+
+    def test_job_claiming_leaves_cpu_intensive_work_for_an_available_slot(self) -> None:
+        create_recording("recording-scheduler", "C:/clips/scheduler.mp4", "scheduler.mp4", True, self.database_path)
+        timestamp = "2026-11-20T00:00:00+00:00"
+        with database_session(self.database_path) as connection:
+            connection.execute("UPDATE jobs SET status = 'complete' WHERE id = 'job-recording-scheduler'")
+            connection.execute(
+                "INSERT INTO jobs(id, recording_id, job_type, status, progress, stage, created_at, updated_at) VALUES (?, ?, 'generate_metadata', 'queued', 0, 'queued', ?, ?)",
+                ("job-heavy-scheduler", "recording-scheduler", timestamp, timestamp),
+            )
+            connection.execute(
+                "INSERT INTO jobs(id, recording_id, job_type, status, progress, stage, created_at, updated_at) VALUES (?, ?, 'youtube_upload', 'queued', 0, 'queued', ?, ?)",
+                ("job-io-scheduler", "recording-scheduler", timestamp, timestamp),
+            )
+
+        io_job = claim_next_job(allow_cpu_intensive=False, database_path=self.database_path)
+        self.assertEqual(io_job["id"], "job-io-scheduler")
+        self.assertIsNone(claim_next_job(allow_cpu_intensive=False, database_path=self.database_path))
+        cpu_job = claim_next_job(allow_cpu_intensive=True, database_path=self.database_path)
+        self.assertEqual(cpu_job["id"], "job-heavy-scheduler")
 
 
 if __name__ == "__main__":

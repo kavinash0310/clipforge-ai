@@ -78,12 +78,17 @@ def _run_cancellable(
                 raise subprocess.TimeoutExpired(command, timeout_seconds, output=stdout, stderr=stderr)
 
 
-def extract_audio(source: Path, destination: Path, check_cancel: Callable[[], None] | None = None) -> None:
+def extract_audio(
+    source: Path,
+    destination: Path,
+    check_cancel: Callable[[], None] | None = None,
+    cpu_threads: int = 1,
+) -> None:
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         raise RuntimeError("FFmpeg was not found on PATH. Install FFmpeg and restart ClipForge.")
     command = [
-        ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(source),
+        ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-threads", str(max(1, cpu_threads)), "-i", str(source),
         "-map", "0:a:0", "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le",
         str(destination),
     ]
@@ -128,12 +133,17 @@ def analyze_audio_energy(wav_path: Path, check_cancel: Callable[[], None] | None
     return values, profile
 
 
-def detect_scene_cuts(source: Path, check_cancel: Callable[[], None] | None = None) -> list[float]:
+def detect_scene_cuts(
+    source: Path,
+    check_cancel: Callable[[], None] | None = None,
+    cpu_threads: int = 1,
+) -> list[float]:
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         raise RuntimeError("FFmpeg was not found on PATH. Install FFmpeg and restart ClipForge.")
     command = [
-        ffmpeg, "-hide_banner", "-nostats", "-loglevel", "info", "-i", str(source),
+        ffmpeg, "-hide_banner", "-nostats", "-loglevel", "info",
+        "-threads", str(max(1, cpu_threads)), "-filter_threads", str(max(1, cpu_threads)), "-i", str(source),
         "-an", "-vf", "select='gt(scene,0.30)',showinfo", "-fps_mode", "vfr",
         "-f", "null", "-",
     ]
@@ -163,7 +173,7 @@ def transcribe_recording(
     with tempfile.TemporaryDirectory(prefix="audio-", dir=DATA_DIR) as temporary_directory:
         wav_path = Path(temporary_directory) / "analysis.wav"
         progress(12, 0, "extracting_audio")
-        extract_audio(source, wav_path, check_cancel)
+        extract_audio(source, wav_path, check_cancel, cpu_threads)
 
         check_cancel()
         progress(20, 0, "analyzing_audio")
@@ -171,7 +181,7 @@ def transcribe_recording(
 
         check_cancel()
         progress(34, 0, "detecting_scenes")
-        scene_cuts = detect_scene_cuts(source, check_cancel)
+        scene_cuts = detect_scene_cuts(source, check_cancel, cpu_threads)
 
         check_cancel()
         progress(42, 0, "loading_model")

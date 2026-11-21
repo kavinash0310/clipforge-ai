@@ -29,7 +29,8 @@ Rendering uses FFmpeg's `libx264` encoder and subtitles/libass filter. If a rend
 ## Settings
 
 - Select manual, semi-automatic, or automatic as your preferred future workflow. Semi-automatic is the default.
-- Set a conservative job concurrency and CPU target for this machine.
+- Set the maximum worker slots and CPU thread budget for this machine. CPU-heavy analysis, rendering, and local metadata jobs run one at a time; lighter I/O work may share remaining slots.
+- To limit when queued work starts, enable **Use a weekly schedule**, set start/end times, and select weekdays. Times use this computer's local timezone. A window that ends earlier than it starts runs overnight, assigned to its start day; equal times mean all day. Running jobs finish when the window closes, while new jobs wait.
 - Pause processing to stop new work from starting.
 - Emergency stop is a separate persisted control that future workers must check before processing or publishing.
 

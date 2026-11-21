@@ -230,6 +230,18 @@ h1 { margin: 0; color: #f0f0f5; font-size: clamp(26px, 2.4vw, 33px); font-weight
 .setting-control-copy strong { color: #cfd1d9; font-size: 10px; font-weight: 600; }
 .setting-control-copy small { color: #7d8492; font-size: 9px; }
 .setting-control-row select { min-width: 104px; padding: 7px 9px; color: #cfd1dc; background: #171a23; border: 1px solid #303542; border-radius: 6px; font-size: 9px; cursor: pointer; }
+.schedule-time-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 10px 0 12px; border-top: 1px solid #242833; }
+.schedule-time-grid label { display: flex; flex-direction: column; gap: 6px; color: #818895; font-size: 9px; }
+.schedule-time-grid input { min-width: 0; padding: 8px 9px; color: #d6d9e1; background: #171a23; border: 1px solid #303542; border-radius: 6px; font: inherit; color-scheme: dark; }
+.schedule-days-heading { display: flex; flex-direction: column; gap: 4px; margin-bottom: 9px; }
+.schedule-days-heading strong { color: #cfd1d9; font-size: 10px; font-weight: 600; }
+.schedule-days-heading small { color: #7d8492; font-size: 9px; }
+.schedule-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.schedule-days button { min-height: 31px; padding: 0; color: #9298a5; background: #11141b; border: 1px solid #2a2f39; border-radius: 6px; font-size: 9px; cursor: pointer; }
+.schedule-days button:hover:not(:disabled) { border-color: #5a4a78; }
+.schedule-days button.selected { color: #dfd5ff; background: #211b30; border-color: #655381; }
+.schedule-days button:disabled { opacity: .48; cursor: not-allowed; }
+.schedule-controls.disabled { opacity: .58; }
 .settings-footnote { display: flex; align-items: center; gap: 7px; margin-top: 7px; color: #898c98; font-size: 9px; }
 .settings-footnote svg { color: #9d8ad5; }
 .toggle-row { display: flex; align-items: center; gap: 10px; min-height: 56px; border-top: 1px solid #242833; }

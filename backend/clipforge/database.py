@@ -17,6 +17,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "emergency_stop": False,
     "max_concurrent_jobs": 1,
     "cpu_limit_percent": 75,
+    "processing_schedule_enabled": False,
+    "processing_schedule_start": "22:00",
+    "processing_schedule_end": "06:00",
+    "processing_schedule_days": [0, 1, 2, 3, 4, 5, 6],
     "ollama_url": "http://127.0.0.1:11434",
     "ollama_model": "qwen3.5:4b",
     "transcription_model": "base",
@@ -370,11 +374,16 @@ def list_jobs(limit: int = 30) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
-def claim_next_job() -> dict[str, Any] | None:
-    with database_session() as connection:
-        row = connection.execute(
-            "SELECT id, recording_id, clip_id, payload_json, job_type, attempt_count FROM jobs WHERE status = 'queued' ORDER BY created_at LIMIT 1"
-        ).fetchone()
+def claim_next_job(
+    *,
+    allow_cpu_intensive: bool = True,
+    database_path: Path | None = None,
+) -> dict[str, Any] | None:
+    with database_session(database_path) as connection:
+        query = "SELECT id, recording_id, clip_id, payload_json, job_type, attempt_count FROM jobs WHERE status = 'queued'"
+        if not allow_cpu_intensive:
+            query += " AND job_type NOT IN ('analyze_recording', 'render_clip', 'generate_metadata')"
+        row = connection.execute(query + " ORDER BY created_at LIMIT 1").fetchone()
         if row is None:
             return None
         timestamp = utc_now()

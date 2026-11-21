@@ -24,6 +24,15 @@ The UI is a Vite-built React application. During development, Vite proxies `/api
 - **Verification:** Exercise health, overview, settings read/write, and invalid-setting responses.
 - **Interview explanation:** “A small modular monolith keeps local deployment simple while retaining clear API boundaries.”
 
+### Queue scheduling and resource controls
+
+- **What / why:** Starts queued work inside an optional weekly window and bounds how much CPU-heavy work competes for a 16 GB local system.
+- **How:** The worker checks the persisted schedule using the computer's local timezone before claiming new jobs. The queue can fill configured worker slots, but only one analysis, render, or local metadata generation job is claimed at once; I/O work may share spare slots. CPU percentage is converted to a conservative per-job thread count passed to faster-whisper and FFmpeg.
+- **Technology:** Persisted SQLite settings, a small local-time window evaluator, asyncio worker slots, and per-process thread controls.
+- **Alternatives:** Windows Task Scheduler for launching the whole app, hard CPU affinity/priority controls, or concurrent heavy jobs with a memory-pressure risk.
+- **Verification:** Check weekday and overnight schedule boundaries, invalid settings, queue lane selection, thread-budget mapping, and the production UI build.
+- **Interview explanation:** “The schedule gates job starts without losing queued work. Resource settings change worker behavior, while the CPU target is described honestly as a thread budget rather than an exact OS quota.”
+
 ### System inspection
 
 - **What / why:** Reports whether the machine can run media and model tools before configuration.

@@ -7,6 +7,7 @@ import {
   BarChart3,
   Check,
   ChevronDown,
+  Clock3,
   CircleHelp,
   Clapperboard,
   Cpu,
@@ -76,6 +77,10 @@ type Settings = {
   emergency_stop: boolean;
   max_concurrent_jobs: number;
   cpu_limit_percent: number;
+  processing_schedule_enabled: boolean;
+  processing_schedule_start: string;
+  processing_schedule_end: string;
+  processing_schedule_days: number[];
   ollama_url: string;
   ollama_model: string;
   transcription_model: "tiny" | "base" | "small";
@@ -1142,13 +1147,13 @@ function SettingsPage({ settings, system, saved, saveSettings, loading }: {
           <section className="surface-card settings-card">
             <div className="settings-card-heading"><div className="settings-card-icon blue"><Gauge size={17} /></div><div><h3>Resource limits</h3><p>Keep local processing responsive while other apps are open.</p></div></div>
             <div className="setting-control-row">
-              <div className="setting-control-copy"><strong>Maximum concurrent jobs</strong><small>Start with one worker for this 16 GB system.</small></div>
+              <div className="setting-control-copy"><strong>Maximum concurrent jobs</strong><small>Overall worker slots; CPU-heavy jobs still run one at a time.</small></div>
               <select value={settings.max_concurrent_jobs} onChange={(event) => void saveSettings({ max_concurrent_jobs: Number(event.target.value) })}>
                 {[1, 2, 3, 4].map((value) => <option key={value} value={value}>{value} {value === 1 ? "job" : "jobs"}</option>)}
               </select>
             </div>
             <div className="setting-control-row">
-              <div className="setting-control-copy"><strong>CPU usage limit</strong><small>Worker target when processing is available.</small></div>
+              <div className="setting-control-copy"><strong>CPU thread budget</strong><small>Limits parallel threads used by transcription and FFmpeg.</small></div>
               <select value={settings.cpu_limit_percent} onChange={(event) => void saveSettings({ cpu_limit_percent: Number(event.target.value) })}>
                 {[50, 60, 70, 75, 80, 90].map((value) => <option key={value} value={value}>{value}%</option>)}
               </select>
@@ -1159,7 +1164,29 @@ function SettingsPage({ settings, system, saved, saveSettings, loading }: {
                 <option value="tiny">Tiny · fastest</option><option value="base">Base · balanced</option><option value="small">Small · more accurate</option>
               </select>
             </div>
-            <div className="settings-footnote"><Cpu size={14} /> Transcription uses CPU int8 to leave the 4 GB GPU available to the desktop and local LLM.</div>
+            <div className="settings-footnote"><Cpu size={14} /> Thread counts are a practical resource target, not a hard operating-system CPU cap. Transcription uses CPU int8.</div>
+          </section>
+
+          <section className="surface-card settings-card schedule-card">
+            <div className="settings-card-heading"><div className="settings-card-icon green"><Clock3 size={16} /></div><div><h3>Processing schedule</h3><p>Choose when queued jobs may start on this device.</p></div></div>
+            <ToggleRow title="Use a weekly schedule" detail="Jobs wait in the queue outside the selected window." checked={settings.processing_schedule_enabled} onChange={(checked) => void saveSettings({ processing_schedule_enabled: checked })} icon={Clock3} />
+            <div className={`schedule-controls ${settings.processing_schedule_enabled ? "" : "disabled"}`}>
+              <div className="schedule-time-grid">
+                <label><span>Start</span><input type="time" value={settings.processing_schedule_start} disabled={!settings.processing_schedule_enabled} onChange={(event) => void saveSettings({ processing_schedule_start: event.target.value })} /></label>
+                <label><span>End</span><input type="time" value={settings.processing_schedule_end} disabled={!settings.processing_schedule_enabled} onChange={(event) => void saveSettings({ processing_schedule_end: event.target.value })} /></label>
+              </div>
+              <div className="schedule-days-heading"><strong>Active days</strong><small>Uses this computer’s local time ({Intl.DateTimeFormat().resolvedOptions().timeZone || "local timezone"}).</small></div>
+              <div className="schedule-days" aria-label="Scheduled weekdays">
+                {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day, index) => {
+                  const selected = settings.processing_schedule_days.includes(index);
+                  return <button key={day} type="button" className={selected ? "selected" : ""} aria-pressed={selected} disabled={!settings.processing_schedule_enabled || (selected && settings.processing_schedule_days.length === 1)} onClick={() => {
+                    const days = selected ? settings.processing_schedule_days.filter((value) => value !== index) : [...settings.processing_schedule_days, index];
+                    void saveSettings({ processing_schedule_days: days.sort((a, b) => a - b) });
+                  }}>{day}</button>;
+                })}
+              </div>
+            </div>
+            <div className="settings-footnote"><Clock3 size={14} /> An end time earlier than the start time runs overnight. Equal times mean the full selected day.</div>
           </section>
 
           <section className="surface-card settings-card control-card">

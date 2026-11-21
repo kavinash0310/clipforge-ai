@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import time
 from pathlib import Path
 from typing import Any
@@ -33,6 +32,8 @@ from .media import probe_video, validate_video_path
 from .highlights import generate_highlights
 from .transcription import transcribe_recording
 from .metadata import generate_clip_metadata
+from .resource_limits import cpu_thread_budget
+from .scheduling import schedule_window_is_open
 from .youtube_api import upload_private_video
 
 
@@ -81,6 +82,8 @@ def _process_job(job: dict[str, Any]) -> None:
                 update_recording_status(recording_id, "ready" if job["job_type"] == "analyze_recording" else "queued")
             return
 
+        cpu_threads = cpu_thread_budget(settings["cpu_limit_percent"])
+
         path = validate_video_path(recording["file_path"]) if job["job_type"] in {"inspect_recording", "analyze_recording", "render_clip"} else None
         if job["job_type"] == "inspect_recording":
             update_job(job_id, stage="probing", progress=12)
@@ -108,7 +111,7 @@ def _process_job(job: dict[str, Any]) -> None:
                 source=path,
                 recording_id=recording_id,
                 model_name=settings["transcription_model"],
-                cpu_threads=min(4, os.cpu_count() or 1),
+                cpu_threads=cpu_threads,
                 progress=progress,
                 check_cancel=check_cancel,
             )
@@ -144,6 +147,7 @@ def _process_job(job: dict[str, Any]) -> None:
                 subtitles=clip["subtitles"],
                 progress=render_progress,
                 check_cancel=_ensure_not_paused,
+                cpu_threads=cpu_threads,
             )
             set_clip_render_status(
                 clip_id,
@@ -252,17 +256,16 @@ async def run_worker() -> None:
                 logger.exception("Background processing task exited unexpectedly")
 
         settings = await asyncio.to_thread(read_settings)
-        if not settings["emergency_stop"] and not settings["processing_paused"]:
+        schedule_open = schedule_window_is_open(settings)
+        if not settings["emergency_stop"] and not settings["processing_paused"] and schedule_open:
             await asyncio.to_thread(resume_paused_jobs)
             limit = max(1, min(int(settings["max_concurrent_jobs"]), 4))
-            heavy_job_active = any(job_type in {"analyze_recording", "render_clip", "generate_metadata", "youtube_upload"} for job_type in active.values())
-            while len(active) < limit and not heavy_job_active:
-                job = await asyncio.to_thread(claim_next_job)
+            while len(active) < limit:
+                cpu_job_active = any(job_type in {"analyze_recording", "render_clip", "generate_metadata"} for job_type in active.values())
+                job = await asyncio.to_thread(claim_next_job, allow_cpu_intensive=not cpu_job_active)
                 if job is None:
                     break
                 task = asyncio.create_task(asyncio.to_thread(_process_job, job))
                 active[task] = job["job_type"]
-                if job["job_type"] in {"analyze_recording", "render_clip", "generate_metadata", "youtube_upload"}:
-                    break
         await asyncio.sleep(0.5)
 

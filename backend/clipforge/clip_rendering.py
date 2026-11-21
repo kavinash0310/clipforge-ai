@@ -83,6 +83,7 @@ def render_vertical_clip(
     subtitles: list[dict[str, Any]],
     check_cancel: Callable[[], None],
     progress: Callable[[int, str], None],
+    cpu_threads: int | None = None,
 ) -> dict[str, Any]:
     duration = end_seconds - start_seconds
     if start_seconds < 0 or duration <= 0 or duration > 600:
@@ -92,6 +93,7 @@ def render_vertical_clip(
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         raise RuntimeError("FFmpeg was not found on PATH. Install FFmpeg and restart ClipForge.")
+    thread_count = max(1, min(int(cpu_threads or 4), os.cpu_count() or 1))
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary_video = destination.with_name(f"{destination.stem}.rendering.mp4")
@@ -109,10 +111,11 @@ def render_vertical_clip(
     )
     command = [
         ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+        "-filter_complex_threads", str(thread_count),
         "-ss", f"{start_seconds:.3f}", "-i", str(source), "-t", f"{duration:.3f}",
         "-filter_complex", filter_graph, "-map", "[v]", "-map", "0:a:0?",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
-        "-threads", str(max(1, min(4, os.cpu_count() or 1))),
+        "-threads", str(thread_count),
         "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart",
         str(temporary_video),
     ]
