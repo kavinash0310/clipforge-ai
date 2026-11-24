@@ -25,6 +25,7 @@ YOUTUBE_SCOPES = (
     "https://www.googleapis.com/auth/yt-analytics.readonly",
 )
 AUTHORIZATION_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
+LEGACY_AUTHORIZATION_ENDPOINT = "https://accounts.google.com/o/oauth2/auth"
 TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 REVOKE_ENDPOINT = "https://oauth2.googleapis.com/revoke"
 CLIENT_SECRETS_PATH = DATA_DIR / "client_secrets.json"
@@ -43,14 +44,17 @@ def load_installed_client(path: Path = CLIENT_SECRETS_PATH) -> dict[str, str]:
     client_id = client.get("client_id")
     if not isinstance(client_id, str) or not client_id.endswith(".apps.googleusercontent.com"):
         raise RuntimeError("The Desktop OAuth client file has no valid client_id.")
+    auth_uri = str(client.get("auth_uri") or AUTHORIZATION_ENDPOINT)
+    token_uri = str(client.get("token_uri") or TOKEN_ENDPOINT)
     values = {
         "client_id": client_id,
         "client_secret": str(client.get("client_secret") or ""),
-        "auth_uri": str(client.get("auth_uri") or AUTHORIZATION_ENDPOINT),
-        "token_uri": str(client.get("token_uri") or TOKEN_ENDPOINT),
+        "auth_uri": auth_uri,
+        "token_uri": token_uri,
     }
-    if values["auth_uri"] != AUTHORIZATION_ENDPOINT or values["token_uri"] != TOKEN_ENDPOINT:
+    if auth_uri not in {AUTHORIZATION_ENDPOINT, LEGACY_AUTHORIZATION_ENDPOINT} or token_uri != TOKEN_ENDPOINT:
         raise RuntimeError("The OAuth client file must use Google's standard authorization and token endpoints.")
+    values["auth_uri"] = AUTHORIZATION_ENDPOINT
     return values
 
 
